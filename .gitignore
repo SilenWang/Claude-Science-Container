@@ -1,0 +1,9 @@
+operon-linux
+.env
+__pycache__/
+*.pyc
+.pixi/
+pixi.lock
+# pixi environments
+.pixi/*
+!.pixi/config.toml

@@ -1,0 +1,17 @@
+[workspace]
+authors = ["Sylens Wong <qiumin14@163.com>"]
+channels = ["conda-forge"]
+name = "Claude-Science-Container"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+build = "docker build -t claude-science-container ."
+start = "docker compose up -d"
+stop = "docker compose down"
+logs = "docker compose logs -f"
+restart = "docker compose restart"
+shell = "docker compose exec claude-science bash"
+build-nc = "docker build --no-cache -t claude-science-container ."
+
+[dependencies]

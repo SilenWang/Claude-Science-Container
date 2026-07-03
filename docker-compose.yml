@@ -1,0 +1,25 @@
+services:
+  claude-science:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        OPERON_DOWNLOAD_URL: ""
+    image: claude-science-container
+    container_name: claude-science
+    restart: unless-stopped
+    ports:
+      - "9876:9876"
+    environment:
+      CUSTOM_API_KEY: "${CUSTOM_API_KEY:-}"
+      CUSTOM_BASE_URL: "${CUSTOM_BASE_URL:-}"
+      DEFAULT_BACKEND: "${DEFAULT_BACKEND:-custom}"
+      FORCE_MODEL: "${FORCE_MODEL:-}"
+      CUSTOM_UPSTREAM_MODE: "${CUSTOM_UPSTREAM_MODE:-openai}"
+      INLINE_IMAGE_POLICY: "${INLINE_IMAGE_POLICY:-preserve}"
+    volumes:
+      - operon-data:/root/.claude-science
+      - ./operon-linux:/root/.local/bin/operon:ro
+
+volumes:
+  operon-data:
