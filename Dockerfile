@@ -16,16 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt/claude-science
 
 ARG CLAUDE_SCIENCE_DOWNLOAD_URL=""
-COPY claude-science-linux /tmp/claude-science-linux
 RUN if [ -n "$CLAUDE_SCIENCE_DOWNLOAD_URL" ]; then \
-        curl -fsSL -o /usr/local/bin/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL"; \
-    elif [ -f /tmp/claude-science-linux ]; then \
-        cp /tmp/claude-science-linux /usr/local/bin/claude-science; \
-    fi && \
-    if [ -f /usr/local/bin/claude-science ]; then \
+        curl -fsSL -o /usr/local/bin/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL" && \
         chmod +x /usr/local/bin/claude-science; \
-    fi && \
-    rm -f /tmp/claude-science-linux
+    fi
 
 RUN git clone --depth 1 https://github.com/Jyx0208/claude-science-api-bridge.git /opt/claude-science/api-bridge && \
     rm -rf /opt/claude-science/api-bridge/.git
