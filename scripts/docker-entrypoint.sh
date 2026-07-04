@@ -29,6 +29,10 @@ apply_config() {
     local cfg="/opt/api-bridge/config.json"
     local py="/opt/api-bridge/.venv/bin/python"
 
+    DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}" \
+    DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL:-}" \
+    OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+    OPENAI_BASE_URL="${OPENAI_BASE_URL:-}" \
     CUSTOM_API_KEY="${CUSTOM_API_KEY:-}" \
     CUSTOM_BASE_URL="${CUSTOM_BASE_URL:-}" \
     DEFAULT_BACKEND="${DEFAULT_BACKEND:-custom}" \
@@ -41,7 +45,20 @@ apply_config() {
 import json, os, sys
 path = sys.argv[1]
 data = json.loads(open(path).read())
-mapping = { "CUSTOM_API_KEY": "custom_api_key", "CUSTOM_BASE_URL": "custom_base_url", "DEFAULT_BACKEND": "default_backend", "FORCE_MODEL": "force_model", "CUSTOM_UPSTREAM_MODE": "custom_upstream_mode", "INLINE_IMAGE_POLICY": "inline_image_policy", "PROXY_HOST": "proxy_host", "PROXY_PORT": "proxy_port" }
+mapping = {
+    "DEEPSEEK_API_KEY": "deepseek_api_key",
+    "DEEPSEEK_BASE_URL": "deepseek_base_url",
+    "OPENAI_API_KEY": "openai_api_key",
+    "OPENAI_BASE_URL": "openai_base_url",
+    "CUSTOM_API_KEY": "custom_api_key",
+    "CUSTOM_BASE_URL": "custom_base_url",
+    "DEFAULT_BACKEND": "default_backend",
+    "FORCE_MODEL": "force_model",
+    "CUSTOM_UPSTREAM_MODE": "custom_upstream_mode",
+    "INLINE_IMAGE_POLICY": "inline_image_policy",
+    "PROXY_HOST": "proxy_host",
+    "PROXY_PORT": "proxy_port"
+}
 changed = []
 for env_k, cfg_k in mapping.items():
     v = os.environ.get(env_k)

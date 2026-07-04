@@ -13,6 +13,10 @@ services:
       - "9876:9876"
       - "9981:9981"
     environment:
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
       CUSTOM_API_KEY: "${CUSTOM_API_KEY:-}"
       CUSTOM_BASE_URL: "${CUSTOM_BASE_URL:-}"
       DEFAULT_BACKEND: "${DEFAULT_BACKEND:-custom}"
