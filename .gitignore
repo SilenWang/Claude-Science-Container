@@ -2,7 +2,3 @@ claude-science-linux
 .env
 __pycache__/
 *.pyc
-.pixi/
-pixi.lock
-.pixi/*
-!.pixi/config.toml
