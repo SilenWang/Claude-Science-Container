@@ -11,8 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --no-cache-dir --break-system-packages cryptography
-
 ARG CLAUDE_SCIENCE_DOWNLOAD_URL=""
 RUN if [ -n "$CLAUDE_SCIENCE_DOWNLOAD_URL" ]; then \
         curl -fsSL --connect-timeout 10 --max-time 60 \
@@ -21,7 +19,6 @@ RUN if [ -n "$CLAUDE_SCIENCE_DOWNLOAD_URL" ]; then \
     fi
 
 COPY scripts/docker-entrypoint-cs.sh /usr/local/bin/docker-entrypoint.sh
-COPY scripts/setup-token.py /opt/setup-token.py
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 9981

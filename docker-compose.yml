@@ -14,6 +14,8 @@ services:
       FORCE_MODEL: "${FORCE_MODEL:-}"
       CUSTOM_UPSTREAM_MODE: "${CUSTOM_UPSTREAM_MODE:-openai}"
       INLINE_IMAGE_POLICY: "${INLINE_IMAGE_POLICY:-preserve}"
+    volumes:
+      - cs-data:/root/.claude-science
 
   claude-science:
     build:
