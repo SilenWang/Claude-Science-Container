@@ -28,10 +28,7 @@ services:
     depends_on:
       api-bridge:
         condition: service_started
-    cap_add:
-      - SYS_ADMIN
-    security_opt:
-      - seccomp:unconfined
+    privileged: true
     volumes:
       - cs-data:/root/.claude-science
 
