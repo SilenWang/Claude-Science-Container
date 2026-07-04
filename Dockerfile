@@ -1,6 +1,7 @@
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -15,11 +16,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt/claude-science
 
-ARG CLAUDE_SCIENCE_DOWNLOAD_URL="https://downloads.claude.ai/claude-science/latest/linux-x64"
+ARG CLAUDE_SCIENCE_DOWNLOAD_URL=""
 RUN if [ -n "$CLAUDE_SCIENCE_DOWNLOAD_URL" ]; then \
-        curl -fsSL -o /usr/local/bin/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL" && \
-        chmod +x /usr/local/bin/claude-science; \
-    fi
+        curl -fsSL --connect-timeout 10 --max-time 60 \
+            -o /usr/local/bin/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL" && \
+        chmod +x /usr/local/bin/claude-science || \
+        echo "WARNING: claude-science download failed (optional, can mount at runtime)"; \
+    fi && rm -f /tmp/claude-science-download
 
 RUN git clone --depth 1 https://github.com/Jyx0208/claude-science-api-bridge.git /opt/claude-science/api-bridge && \
     rm -rf /opt/claude-science/api-bridge/.git

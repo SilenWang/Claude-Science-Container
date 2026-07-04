@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        CLAUDE_SCIENCE_DOWNLOAD_URL: ""
     image: claude-science-container
     container_name: claude-science
     restart: unless-stopped
