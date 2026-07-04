@@ -25,8 +25,9 @@ services:
     image: claude-science-daemon
     container_name: claude-science
     restart: unless-stopped
-    profiles:
-      - cs
+    depends_on:
+      api-bridge:
+        condition: service_started
     volumes:
       - cs-data:/root/.claude-science
       - ./claude-science-linux:/usr/local/bin/claude-science:ro
