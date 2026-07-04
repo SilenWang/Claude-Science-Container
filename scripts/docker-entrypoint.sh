@@ -39,6 +39,9 @@ apply_config() {
     FORCE_MODEL="${FORCE_MODEL:-}" \
     CUSTOM_UPSTREAM_MODE="${CUSTOM_UPSTREAM_MODE:-openai}" \
     INLINE_IMAGE_POLICY="${INLINE_IMAGE_POLICY:-preserve}" \
+    DEEPSEEK_MODEL_PATTERN="${DEEPSEEK_MODEL_PATTERN:-}" \
+    OPENAI_MODEL_PATTERN="${OPENAI_MODEL_PATTERN:-}" \
+    CUSTOM_MODEL_PATTERN="${CUSTOM_MODEL_PATTERN:-}" \
     PROXY_HOST="0.0.0.0" \
     PROXY_PORT="9876" \
     "$py" - "$cfg" <<'PY'
@@ -56,6 +59,9 @@ mapping = {
     "FORCE_MODEL": "force_model",
     "CUSTOM_UPSTREAM_MODE": "custom_upstream_mode",
     "INLINE_IMAGE_POLICY": "inline_image_policy",
+    "DEEPSEEK_MODEL_PATTERN": "deepseek_model_pattern",
+    "OPENAI_MODEL_PATTERN": "openai_model_pattern",
+    "CUSTOM_MODEL_PATTERN": "custom_model_pattern",
     "PROXY_HOST": "proxy_host",
     "PROXY_PORT": "proxy_port"
 }

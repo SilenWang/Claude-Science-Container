@@ -23,6 +23,9 @@ services:
       FORCE_MODEL: "${FORCE_MODEL:-}"
       CUSTOM_UPSTREAM_MODE: "${CUSTOM_UPSTREAM_MODE:-openai}"
       INLINE_IMAGE_POLICY: "${INLINE_IMAGE_POLICY:-preserve}"
+      DEEPSEEK_MODEL_PATTERN: "${DEEPSEEK_MODEL_PATTERN:-}"
+      OPENAI_MODEL_PATTERN: "${OPENAI_MODEL_PATTERN:-}"
+      CUSTOM_MODEL_PATTERN: "${CUSTOM_MODEL_PATTERN:-}"
     volumes:
       - cs-data:/root/.claude-science
 
