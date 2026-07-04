@@ -1,0 +1,25 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    bubblewrap \
+    socat \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG CLAUDE_SCIENCE_DOWNLOAD_URL=""
+RUN if [ -n "$CLAUDE_SCIENCE_DOWNLOAD_URL" ]; then \
+        curl -fsSL --connect-timeout 10 --max-time 60 \
+            -o /usr/local/bin/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL" && \
+        chmod +x /usr/local/bin/claude-science || \
+        echo "WARNING: claude-science download failed (optional, can mount at runtime)"; \
+    fi
+
+COPY scripts/docker-entrypoint-cs.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+EXPOSE 8000
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

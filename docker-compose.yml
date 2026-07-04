@@ -1,12 +1,10 @@
 services:
-  claude-science:
+  api-bridge:
     build:
       context: .
-      dockerfile: Dockerfile
-      args:
-        CLAUDE_SCIENCE_DOWNLOAD_URL: ""
-    image: claude-science-container
-    container_name: claude-science
+      dockerfile: Dockerfile.api-bridge
+    image: claude-science-api-bridge
+    container_name: api-bridge
     restart: unless-stopped
     ports:
       - "9876:9876"
@@ -17,8 +15,21 @@ services:
       FORCE_MODEL: "${FORCE_MODEL:-}"
       CUSTOM_UPSTREAM_MODE: "${CUSTOM_UPSTREAM_MODE:-openai}"
       INLINE_IMAGE_POLICY: "${INLINE_IMAGE_POLICY:-preserve}"
+
+  claude-science:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude-science
+      args:
+        CLAUDE_SCIENCE_DOWNLOAD_URL: ""
+    image: claude-science-daemon
+    container_name: claude-science
+    restart: unless-stopped
+    profiles:
+      - cs
     volumes:
-      - claude-science-data:/root/.claude-science
+      - cs-data:/root/.claude-science
+      - ./claude-science-linux:/usr/local/bin/claude-science:ro
 
 volumes:
-  claude-science-data:
+  cs-data:
