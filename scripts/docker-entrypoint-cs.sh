@@ -7,7 +7,9 @@ ENC_KEY="${CS_HOME}/encryption.key"
 
 if ! command -v "$CS_BIN" &>/dev/null; then
     echo "ERROR: claude-science binary not found at $CS_BIN"
-    exit 1
+    echo "Provide binary via CLAUDE_SCIENCE_DOWNLOAD_URL build arg or mount to $CS_BIN"
+    echo "Container will idle until binary is available..."
+    sleep infinity
 fi
 
 if [ ! -f "$ENC_KEY" ]; then
