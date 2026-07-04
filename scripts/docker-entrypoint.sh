@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OPERON_BIN="${OPERON_BIN:-/root/.local/bin/operon}"
+CLAUDE_SCIENCE_BIN="${CLAUDE_SCIENCE_BIN:-/root/.local/bin/claude-science}"
 API_BRIDGE_DIR="${API_BRIDGE_DIR:-/opt/claude-science-api-bridge}"
 
 PROXY_HOST="${PROXY_HOST:-0.0.0.0}"
@@ -79,16 +79,16 @@ if changed:
 PY
 }
 
-start_operon() {
-    if [ ! -f "$OPERON_BIN" ]; then
-        echo "WARNING: operon binary not found at $OPERON_BIN"
-        echo "Download from https://claude.com/product/claude-science and mount to $OPERON_BIN"
+start_claude_science() {
+    if [ ! -f "$CLAUDE_SCIENCE_BIN" ]; then
+        echo "WARNING: claude-science binary not found at $CLAUDE_SCIENCE_BIN"
+        echo "Download from https://claude.com/product/claude-science and mount to $CLAUDE_SCIENCE_BIN"
         return 0
     fi
 
-    echo "Starting Claude Science (operon)..."
-    "$OPERON_BIN" serve --no-browser --detached 2>&1
-    echo "operon daemon started."
+    echo "Starting Claude Science daemon..."
+    "$CLAUDE_SCIENCE_BIN" serve --no-browser --detached 2>&1
+    echo "claude-science daemon started."
 }
 
 start_api_bridge() {
@@ -112,22 +112,22 @@ start_api_bridge() {
 }
 
 case "${1:-all}" in
-    operon)
-        start_operon
-        echo "operon exited. Container will stop."
+    claude-science)
+        start_claude_science
+        echo "claude-science exited. Container will stop."
         ;;
     bridge)
         start_api_bridge
         ;;
     all)
-        start_operon
+        start_claude_science
         start_api_bridge
         ;;
     shell)
         exec /bin/bash
         ;;
     *)
-        echo "Usage: $0 {operon|bridge|all|shell}"
+        echo "Usage: $0 {claude-science|bridge|all|shell}"
         exit 1
         ;;
 esac

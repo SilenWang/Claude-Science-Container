@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        OPERON_DOWNLOAD_URL: ""
+        CLAUDE_SCIENCE_DOWNLOAD_URL: ""
     image: claude-science-container
     container_name: claude-science
     restart: unless-stopped
@@ -18,8 +18,8 @@ services:
       CUSTOM_UPSTREAM_MODE: "${CUSTOM_UPSTREAM_MODE:-openai}"
       INLINE_IMAGE_POLICY: "${INLINE_IMAGE_POLICY:-preserve}"
     volumes:
-      - operon-data:/root/.claude-science
-      - ./operon-linux:/root/.local/bin/operon:ro
+      - claude-science-data:/root/.claude-science
+      - ./claude-science-linux:/root/.local/bin/claude-science:ro
 
 volumes:
-  operon-data:
+  claude-science-data:

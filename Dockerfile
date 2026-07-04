@@ -13,30 +13,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Attempt to download operon binary if a URL is provided
-ARG OPERON_DOWNLOAD_URL=""
-RUN if [ -n "$OPERON_DOWNLOAD_URL" ]; then \
-        echo "Downloading operon from $OPERON_DOWNLOAD_URL" ; \
-        mkdir -p /tmp/operon-export ; \
-        curl -fsSL -o /tmp/operon-export/operon "$OPERON_DOWNLOAD_URL" ; \
-        chmod +x /tmp/operon-export/operon ; \
+ARG CLAUDE_SCIENCE_DOWNLOAD_URL=""
+RUN if [ -n "$CLAUDE_SCIENCE_DOWNLOAD_URL" ]; then \
+        echo "Downloading claude-science from $CLAUDE_SCIENCE_DOWNLOAD_URL" ; \
+        mkdir -p /tmp/cs ; \
+        curl -fsSL -o /tmp/cs/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL" ; \
+        chmod +x /tmp/cs/claude-science ; \
     fi
 
-# Allow optional operon binary from build context
-COPY operon-linux /build/operon-linux
-RUN if [ -f /build/operon-linux ] && [ ! -f /tmp/operon-export/operon ]; then \
-        mkdir -p /tmp/operon-export ; \
-        cp /build/operon-linux /tmp/operon-export/operon ; \
-        chmod +x /tmp/operon-export/operon ; \
-    elif [ ! -f /tmp/operon-export/operon ]; then \
-        echo "********************************************************************" ; \
-        echo "WARNING: operon binary not provided." ; \
-        echo "Place operon-linux in the build context, set OPERON_DOWNLOAD_URL," ; \
-        echo "or mount the binary at runtime to /root/.local/bin/operon." ; \
+COPY claude-science-linux /build/claude-science-linux
+RUN if [ -f /build/claude-science-linux ] && [ ! -f /tmp/cs/claude-science ]; then \
+        mkdir -p /tmp/cs ; \
+        cp /build/claude-science-linux /tmp/cs/claude-science ; \
+        chmod +x /tmp/cs/claude-science ; \
+    elif [ ! -f /tmp/cs/claude-science ]; then \
+        echo "************************************************************************" ; \
+        echo "WARNING: claude-science binary not provided." ; \
+        echo "Place claude-science-linux in the build context, set" ; \
+        echo "CLAUDE_SCIENCE_DOWNLOAD_URL build arg, or mount the binary at runtime" ; \
+        echo "to /root/.local/bin/claude-science." ; \
         echo "Download from: https://claude.com/product/claude-science" ; \
-        echo "********************************************************************" ; \
-        mkdir -p /tmp/operon-export ; \
-        touch /tmp/operon-export/.placeholder ; \
+        echo "************************************************************************" ; \
+        mkdir -p /tmp/cs ; \
+        touch /tmp/cs/.placeholder ; \
     fi
 
 RUN git clone --depth 1 https://github.com/Jyx0208/claude-science-api-bridge.git /build/api-bridge && \
@@ -46,7 +45,7 @@ FROM ubuntu:${UBUNTU_VERSION}
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/root/.local/bin:$PATH"
-ENV OPERON_HOME="/root/.claude-science"
+ENV CLAUDE_SCIENCE_HOME="/root/.claude-science"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -71,16 +70,16 @@ RUN bwrap_version=$(bwrap --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' || ec
         rm -rf /tmp/bubblewrap; \
     fi
 
-COPY --from=builder /tmp/operon-export /tmp/operon-import
+COPY --from=builder /tmp/cs /tmp/cs-import
 RUN mkdir -p /root/.local/bin && \
-    if [ -f /tmp/operon-import/operon ]; then \
-        cp /tmp/operon-import/operon /root/.local/bin/operon && \
-        chmod +x /root/.local/bin/operon && \
-        echo "operon installed"; \
+    if [ -f /tmp/cs-import/claude-science ]; then \
+        cp /tmp/cs-import/claude-science /root/.local/bin/claude-science && \
+        chmod +x /root/.local/bin/claude-science && \
+        echo "claude-science installed"; \
     else \
-        echo "operon binary not provided at build time - mount at runtime"; \
+        echo "claude-science binary not provided at build time - mount at runtime"; \
     fi && \
-    rm -rf /tmp/operon-import
+    rm -rf /tmp/cs-import
 
 COPY --from=builder /build/api-bridge /opt/claude-science-api-bridge
 
