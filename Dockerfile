@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt/claude-science
 
-ARG CLAUDE_SCIENCE_DOWNLOAD_URL=""
+ARG CLAUDE_SCIENCE_DOWNLOAD_URL="https://downloads.claude.ai/claude-science/latest/linux-x64"
 RUN if [ -n "$CLAUDE_SCIENCE_DOWNLOAD_URL" ]; then \
         curl -fsSL -o /usr/local/bin/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL" && \
         chmod +x /usr/local/bin/claude-science; \
