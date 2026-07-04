@@ -7,16 +7,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bubblewrap \
     socat \
     curl \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL --connect-timeout 10 --max-time 60 \
-        -o /usr/local/bin/claude-science "https://downloads.claude.ai/claude-science/latest/linux-x64" && \
-    chmod +x /usr/local/bin/claude-science || \
-    echo "WARNING: claude-science download failed (optional, can mount at runtime)"
+RUN pip3 install --no-cache-dir --break-system-packages cryptography
+
+ARG CLAUDE_SCIENCE_DOWNLOAD_URL=""
+RUN if [ -n "$CLAUDE_SCIENCE_DOWNLOAD_URL" ]; then \
+        curl -fsSL --connect-timeout 10 --max-time 60 \
+            -o /usr/local/bin/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL" && \
+        chmod +x /usr/local/bin/claude-science || true; \
+    fi
 
 COPY scripts/docker-entrypoint-cs.sh /usr/local/bin/docker-entrypoint.sh
+COPY scripts/setup-token.py /opt/setup-token.py
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-EXPOSE 8000
+EXPOSE 9981
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
