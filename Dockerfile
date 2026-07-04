@@ -1,7 +1,6 @@
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -28,12 +27,9 @@ RUN python3 -m venv /opt/api-bridge/.venv && \
 
 RUN pip3 install --no-cache-dir --break-system-packages cryptography
 
-ARG CLAUDE_SCIENCE_DOWNLOAD_URL=""
-RUN if [ -n "$CLAUDE_SCIENCE_DOWNLOAD_URL" ]; then \
-        curl -fsSL --connect-timeout 10 --max-time 60 \
-            -o /usr/local/bin/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL" && \
-        chmod +x /usr/local/bin/claude-science || true; \
-    fi
+RUN curl -fsSL --connect-timeout 10 --max-time 60 \
+        -o /usr/local/bin/claude-science "https://downloads.claude.ai/claude-science/latest/linux-x64" && \
+    chmod +x /usr/local/bin/claude-science
 
 COPY scripts/supervisord.conf /etc/supervisor/conf.d/claude-science.conf
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
