@@ -6,8 +6,6 @@ services:
     image: claude-science-api-bridge
     container_name: api-bridge
     restart: unless-stopped
-    ports:
-      - "9876:9876"
     environment:
       CUSTOM_API_KEY: "${CUSTOM_API_KEY:-}"
       CUSTOM_BASE_URL: "${CUSTOM_BASE_URL:-}"
@@ -29,6 +27,8 @@ services:
       api-bridge:
         condition: service_started
     privileged: true
+    environment:
+      ANTHROPIC_BASE_URL: "http://api-bridge:9876"
     volumes:
       - cs-data:/root/.claude-science
 
