@@ -1,6 +1,7 @@
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -20,16 +21,15 @@ RUN git clone --depth 1 https://github.com/Jyx0208/claude-science-api-bridge.git
     rm -rf /opt/api-bridge/.git
 
 RUN python3 -m venv /opt/api-bridge/.venv && \
-    /opt/api-bridge/.venv/bin/python3 -m ensurepip --upgrade && \
-    /opt/api-bridge/.venv/bin/pip3 install --no-cache-dir -r /opt/api-bridge/requirements.txt && \
-    cp /opt/api-bridge/config.example.json /opt/api-bridge/config.json && \
-    chmod 600 /opt/api-bridge/config.json
-
-RUN pip3 install --no-cache-dir --break-system-packages cryptography
+    /opt/api-bridge/.venv/bin/pip3 install --no-cache-dir --upgrade pip && \
+    /opt/api-bridge/.venv/bin/pip3 install --no-cache-dir -r /opt/api-bridge/requirements.txt
 
 RUN curl -fsSL --connect-timeout 10 --max-time 60 \
         -o /usr/local/bin/claude-science "https://downloads.claude.ai/claude-science/latest/linux-x64" && \
     chmod +x /usr/local/bin/claude-science
+
+COPY scripts/trim-install-safe.py /tmp/trim-install-safe.py
+RUN python3 /tmp/trim-install-safe.py && rm /tmp/trim-install-safe.py
 
 COPY scripts/supervisord.conf /etc/supervisor/conf.d/claude-science.conf
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
