@@ -15,17 +15,16 @@ WORKDIR /app
 COPY pixi.toml pixi.lock* /app/
 
 ARG CLAUDE_SCIENCE_DOWNLOAD_URL=""
+COPY claude-science-linux /tmp/claude-science-linux
 RUN if [ -n "$CLAUDE_SCIENCE_DOWNLOAD_URL" ]; then \
-        mkdir -p /usr/local/bin && \
-        curl -fsSL -o /usr/local/bin/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL" && \
+        curl -fsSL -o /usr/local/bin/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL"; \
+    elif [ -f /tmp/claude-science-linux ]; then \
+        cp /tmp/claude-science-linux /usr/local/bin/claude-science; \
+    fi && \
+    if [ -f /usr/local/bin/claude-science ]; then \
         chmod +x /usr/local/bin/claude-science; \
-    fi
-
-COPY claude-science-linux /app/claude-science-linux
-RUN if [ -f /app/claude-science-linux ] && [ ! -f /usr/local/bin/claude-science ]; then \
-        cp /app/claude-science-linux /usr/local/bin/claude-science && \
-        chmod +x /usr/local/bin/claude-science; \
-    fi && rm -f /app/claude-science-linux
+    fi && \
+    rm -f /tmp/claude-science-linux
 
 RUN git clone --depth 1 https://github.com/Jyx0208/claude-science-api-bridge.git /app/api-bridge && \
     rm -rf /app/api-bridge/.git
