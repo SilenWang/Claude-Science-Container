@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        CLAUDE_SCIENCE_DOWNLOAD_URL: ""
+        CLAUDE_SCIENCE_DOWNLOAD_URL: "https://downloads.claude.ai/claude-science/latest/linux-x64"
     image: claude-science-container
     container_name: claude-science
     restart: unless-stopped
