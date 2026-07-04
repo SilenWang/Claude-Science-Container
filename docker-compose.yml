@@ -1,39 +1,24 @@
 services:
-  api-bridge:
+  claude-science:
     build:
       context: .
-      dockerfile: Dockerfile.api-bridge
-    image: claude-science-api-bridge
-    container_name: api-bridge
+      dockerfile: Dockerfile
+      args:
+        CLAUDE_SCIENCE_DOWNLOAD_URL: ""
+    image: claude-science-container
+    container_name: claude-science
     restart: unless-stopped
+    privileged: true
+    ports:
+      - "9876:9876"
+      - "9981:9981"
     environment:
-      PROXY_HOST: "0.0.0.0"
       CUSTOM_API_KEY: "${CUSTOM_API_KEY:-}"
       CUSTOM_BASE_URL: "${CUSTOM_BASE_URL:-}"
       DEFAULT_BACKEND: "${DEFAULT_BACKEND:-custom}"
       FORCE_MODEL: "${FORCE_MODEL:-}"
       CUSTOM_UPSTREAM_MODE: "${CUSTOM_UPSTREAM_MODE:-openai}"
       INLINE_IMAGE_POLICY: "${INLINE_IMAGE_POLICY:-preserve}"
-    volumes:
-      - cs-data:/root/.claude-science
-
-  claude-science:
-    build:
-      context: .
-      dockerfile: Dockerfile.claude-science
-      args:
-        CLAUDE_SCIENCE_DOWNLOAD_URL: ""
-    image: claude-science-daemon
-    container_name: claude-science
-    restart: unless-stopped
-    depends_on:
-      api-bridge:
-        condition: service_started
-    privileged: true
-    ports:
-      - "9981:9981"
-    environment:
-      ANTHROPIC_BASE_URL: "http://api-bridge:9876"
     volumes:
       - cs-data:/root/.claude-science
 

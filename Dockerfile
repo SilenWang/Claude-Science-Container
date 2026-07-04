@@ -5,12 +5,17 @@ ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    bubblewrap \
+    socat \
     curl \
     git \
     python3 \
     python3-venv \
     python3-pip \
+    supervisor \
     && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt
 
 RUN git clone --depth 1 https://github.com/Jyx0208/claude-science-api-bridge.git /opt/api-bridge && \
     rm -rf /opt/api-bridge/.git
@@ -21,11 +26,19 @@ RUN python3 -m venv /opt/api-bridge/.venv && \
     cp /opt/api-bridge/config.example.json /opt/api-bridge/config.json && \
     chmod 600 /opt/api-bridge/config.json
 
-COPY scripts/docker-entrypoint-bridge.sh /usr/local/bin/docker-entrypoint.sh
+RUN pip3 install --no-cache-dir --break-system-packages cryptography
+
+ARG CLAUDE_SCIENCE_DOWNLOAD_URL=""
+RUN if [ -n "$CLAUDE_SCIENCE_DOWNLOAD_URL" ]; then \
+        curl -fsSL --connect-timeout 10 --max-time 60 \
+            -o /usr/local/bin/claude-science "$CLAUDE_SCIENCE_DOWNLOAD_URL" && \
+        chmod +x /usr/local/bin/claude-science || true; \
+    fi
+
+COPY scripts/supervisord.conf /etc/supervisor/conf.d/claude-science.conf
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-WORKDIR /opt/api-bridge
-
-EXPOSE 9876
+EXPOSE 9876 9981
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
