@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        CLAUDE_SCIENCE_DOWNLOAD_URL: "https://downloads.claude.ai/claude-science/latest/linux-x64"
+        CLAUDE_SCIENCE_DOWNLOAD_URL: ""
     image: claude-science-container
     container_name: claude-science
     restart: unless-stopped
@@ -19,7 +19,7 @@ services:
       INLINE_IMAGE_POLICY: "${INLINE_IMAGE_POLICY:-preserve}"
     volumes:
       - claude-science-data:/root/.claude-science
-      - ./claude-science-linux:/root/.local/bin/claude-science:ro
+      - ./claude-science-linux:/usr/local/bin/claude-science:ro
 
 volumes:
   claude-science-data:
