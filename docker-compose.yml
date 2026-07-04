@@ -30,7 +30,6 @@ services:
         condition: service_started
     volumes:
       - cs-data:/root/.claude-science
-      - ./claude-science-linux:/usr/local/bin/claude-science:ro
 
 volumes:
   cs-data:
