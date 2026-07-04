@@ -8,4 +8,4 @@ if ! command -v claude-science &>/dev/null; then
 fi
 
 echo "Starting claude-science daemon..."
-exec claude-science serve --no-browser --port 9981
+exec claude-science serve --no-browser --host 0.0.0.0 --port 9981
