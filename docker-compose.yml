@@ -27,6 +27,8 @@ services:
       api-bridge:
         condition: service_started
     privileged: true
+    ports:
+      - "9981:9981"
     environment:
       ANTHROPIC_BASE_URL: "http://api-bridge:9876"
     volumes:
