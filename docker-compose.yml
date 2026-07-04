@@ -17,7 +17,6 @@ services:
       INLINE_IMAGE_POLICY: "${INLINE_IMAGE_POLICY:-preserve}"
     volumes:
       - claude-science-data:/root/.claude-science
-      - ./claude-science-linux:/usr/local/bin/claude-science:ro
 
 volumes:
   claude-science-data:
