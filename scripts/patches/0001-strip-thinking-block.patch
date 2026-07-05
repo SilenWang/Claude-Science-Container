@@ -1,0 +1,9 @@
+--- a/proxy.py
++++ b/proxy.py
+@@ -397,6 +397,8 @@ def build_anthropic_backend_body(body: dict, backend_model: str) -> dict:
+     out["model"] = backend_model
+     if "max_tokens" in out:
+         out["max_tokens"] = clamp_max_tokens_for_model(out["max_tokens"], backend_model)
++    if "thinking" in out:
++        del out["thinking"]
+     return out

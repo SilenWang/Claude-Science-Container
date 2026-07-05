@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     socat \
     curl \
     git \
+    patch \
     python3 \
     python3-venv \
     python3-pip \
@@ -17,8 +18,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt
 
+COPY scripts/patches/ /tmp/patches/
+
 RUN git clone --depth 1 https://github.com/Jyx0208/claude-science-api-bridge.git /opt/api-bridge && \
-    rm -rf /opt/api-bridge/.git
+    rm -rf /opt/api-bridge/.git && \
+    patch -p1 -d /opt/api-bridge < /tmp/patches/0001-strip-thinking-block.patch && \
+    rm -rf /tmp/patches
 
 RUN python3 -m venv /opt/api-bridge/.venv && \
     /opt/api-bridge/.venv/bin/pip3 install --no-cache-dir --upgrade pip && \
