@@ -23,7 +23,7 @@ Run [Claude Science](https://claude.ai/science) Linux edition with a third-party
 ```
 
 - **claude-science** — The official Claude Science Linux binary, configured to route API calls through the internal API bridge.
-- **API Bridge** — Translates Anthropic-style API calls from Claude Science to OpenAI-compatible third-party endpoints (DeepSeek, SiliconFlow, Moonshot, etc.).
+- **API Bridge** — Translates Anthropic-style API calls from Claude Science to OpenAI-compatible third-party endpoints (DeepSeek, SiliconFlow, Moonshot, etc.). Based on [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
 
 ## Prerequisites
 
@@ -118,6 +118,10 @@ docker compose down
 # Rebuild after changes
 docker compose up -d --build
 ```
+
+## Acknowledgements
+
+This project uses [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208) as the API translation layer. All credit for the bridge's backend configuration options and protocol translation logic goes to the original project.
 
 ## License
 
