@@ -36,10 +36,9 @@ The container successfully runs both claude-science and the API bridge. Key acco
 
 ## Known Issues
 
-- **Upstream provider errors** — Some model/backend combinations return `400: Error from provider (Console Go): Upstream request failed`. This is a provider-side limitation and varies by model and endpoint.
-- **MCP directory connectors unavailable** — Claude Science attempts to fetch directory connectors and organization data from claude.ai, which returns `401` because the proxied API key does not grant access to Anthropic's internal services. This does not affect core model calling.
-- **Bundled science MCP servers timeout** — Pre-installed MCP servers (biomart, variants, clinical-genomics, expression, regulation, etc.) fail with `acquire timeout 8000ms` due to the same authentication limitation.
-- **growthbook / feature flags degraded** — Feature flag evaluation falls back to defaults without a claude.ai session.
+- **MCP directory connectors unavailable**
+-  **The `web_search` tool is unavailable**
+- **Missing image interpretation config** — The current .env example does not explicitly configure image handling policies, which may cause unexpected behavior during runtime.
 
 ## Prerequisites
 
@@ -67,15 +66,12 @@ The container successfully runs both claude-science and the API bridge. Key acco
    ```
 
 4. **Open Claude Science**
-   - Visit http://localhost:9981 in your browser
-   - Sign in with your Claude account
-   - The container proxies API requests to your configured third-party backend
+   - Check the container logs for the login URL, you will find something like `http://localhost:9981/?nonce=token`, use this to enter webui of Claude Science in browser.
+
 
 ## Configuration
 
 All configuration is done via environment variables in `.env`:
-
-### Custom Backend (Recommended)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -87,21 +83,7 @@ All configuration is done via environment variables in `.env`:
 | `INLINE_IMAGE_POLICY` | Image handling: `preserve`, `omit`, `omit_inline`, `auto` | `preserve` |
 | `CUSTOM_MODEL_PATTERN` | Regex pattern for custom backend model matching | — |
 
-### DeepSeek Backend
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DEEPSEEK_API_KEY` | DeepSeek API key | — |
-| `DEEPSEEK_BASE_URL` | DeepSeek API base URL | — |
-| `DEEPSEEK_MODEL_PATTERN` | Regex pattern for DeepSeek model matching | — |
-
-### OpenAI Backend
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENAI_API_KEY` | OpenAI API key | — |
-| `OPENAI_BASE_URL` | OpenAI API base URL | — |
-| `OPENAI_MODEL_PATTERN` | Regex pattern for OpenAI model matching | — |
+For more detailed configuration instructions, please refer to the documentation in the [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge).
 
 ## Ports
 
@@ -113,25 +95,6 @@ All configuration is done via environment variables in `.env`:
 ## Data Persistence
 
 Container data (Claude Science configuration and sessions) is stored in a Docker volume named `cs-data`, mounted at `/root/.claude-science`.
-
-## Useful Commands
-
-```bash
-# Build the image
-docker compose build
-
-# Start in background
-docker compose up -d
-
-# View logs
-docker compose logs -f
-
-# Stop
-docker compose down
-
-# Rebuild after changes
-docker compose up -d --build
-```
 
 ## Acknowledgements
 
