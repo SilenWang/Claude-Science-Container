@@ -36,8 +36,12 @@ The container successfully runs both claude-science and the API bridge. Key acco
 
 ## Known Issues
 
-- **MCP directory connectors unavailable**
-- **Missing image interpretation config** — The current .env example does not explicitly configure image handling policies, which may cause unexpected behavior during runtime.
+I am not a professional software developer, so the reasons for some of the features below are based on speculation and are for reference only.
+
+- **MCP directory connectors unavailable**: The error that appears upon entering the settings interface does not seem to cause any appreciable effect in practice. According to the literature review, bioinformatics analysis can be carried out normally.
+-  **The `web_search` tool is unavailable**: Compatibility issue: OpenAI-compatible model endpoints do not provide the tool-calling capabilities of Anthropic-compatible endpoints, and therefore cannot use web search. For example, I encounter this issue when using DeepSeek in opencode-go, but when using the Anthropic-compatible endpoint of the official DeepSeek API, web search works normally.
+- **Missing image interpretation config**: The current .env example does not explicitly configure image handling policies, which may cause unexpected behavior during runtime.
+- **Tasks terminate unexpectedly**: Tasks running on DeepSeek Flash sometimes terminate unexpectedly mid-execution, whereas DeepSeek Pro experiences this issue far less often.
 
 ## Prerequisites
 
