@@ -24,7 +24,20 @@ RUN python3 -m venv /opt/api-bridge/.venv && \
     /opt/api-bridge/.venv/bin/pip3 install --no-cache-dir --upgrade pip && \
     /opt/api-bridge/.venv/bin/pip3 install --no-cache-dir -r /opt/api-bridge/requirements.txt && \
     cp /opt/api-bridge/config.example.json /opt/api-bridge/config.json && \
-    chmod 600 /opt/api-bridge/config.json
+    chmod 600 /opt/api-bridge/config.json && \
+    python3 -c "
+path = '/opt/api-bridge/proxy.py'
+with open(path) as f:
+    lines = f.readlines()
+new_lines = []
+for line in lines:
+    new_lines.append(line)
+    if 'if \"max_tokens\" in out:' in line:
+        new_lines.append('    if \"thinking\" in out:\n')
+        new_lines.append('        del out[\"thinking\"]\n')
+with open(path, 'w') as f:
+    f.writelines(new_lines)
+"
 
 RUN curl -fsSL --connect-timeout 10 --max-time 60 \
         -o /usr/local/bin/claude-science "https://downloads.claude.ai/claude-science/latest/linux-x64" && \
