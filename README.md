@@ -25,9 +25,23 @@ Run [Claude Science](https://claude.ai/science) Linux edition with a third-party
 - **claude-science** — The official Claude Science Linux binary, configured to route API calls through the internal API bridge.
 - **API Bridge** — Translates Anthropic-style API calls from Claude Science to OpenAI-compatible third-party endpoints (DeepSeek, SiliconFlow, Moonshot, etc.). Based on [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
 
-## Prerequisites
+## Current Status
 
-- [Docker](https://docs.docker.com/engine/install/) (with Compose plugin)
+The container successfully runs both claude-science and the API bridge. Key accomplishments:
+
+- **API routing works** — Claude Science routes Anthropic-style API calls through the bridge, which translates them to OpenAI-compatible third-party endpoints. Models are callable via the web UI.
+- **Environment-based configuration** — All API keys and backend options are configurable via environment variables; the entrypoint script (`apply_config`) writes them into the bridge's `config.json` at startup.
+- **OAuth token auto-setup** — On first run, the entrypoint generates an encryption key and OAuth token for claude-science.
+- **Multiple backend support** — Custom (SiliconFlow, Moonshot, etc.), DeepSeek, and OpenAI backends are all supported.
+
+## Known Issues
+
+- **Upstream provider errors** — Some model/backend combinations return `400: Error from provider (Console Go): Upstream request failed`. This is a provider-side limitation and varies by model and endpoint.
+- **MCP directory connectors unavailable** — Claude Science attempts to fetch directory connectors and organization data from claude.ai, which returns `401` because the proxied API key does not grant access to Anthropic's internal services. This does not affect core model calling.
+- **Bundled science MCP servers timeout** — Pre-installed MCP servers (biomart, variants, clinical-genomics, expression, regulation, etc.) fail with `acquire timeout 8000ms` due to the same authentication limitation.
+- **growthbook / feature flags degraded** — Feature flag evaluation falls back to defaults without a claude.ai session.
+
+## Prerequisites
 
 ## Quick Start
 
