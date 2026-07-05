@@ -37,7 +37,6 @@ The container successfully runs both claude-science and the API bridge. Key acco
 ## Known Issues
 
 - **MCP directory connectors unavailable**
--  **The `web_search` tool is unavailable**
 - **Missing image interpretation config** — The current .env example does not explicitly configure image handling policies, which may cause unexpected behavior during runtime.
 
 ## Prerequisites
@@ -77,11 +76,66 @@ All configuration is done via environment variables in `.env`:
 |----------|-------------|---------|
 | `CUSTOM_API_KEY` | API key for the custom backend | — |
 | `CUSTOM_BASE_URL` | API base URL (e.g., SiliconFlow, Moonshot) | — |
-| `DEFAULT_BACKEND` | Default backend selection | `custom` |
+| `DEEPSEEK_API_KEY` | API key for DeepSeek official API | — |
+| `DEEPSEEK_BASE_URL` | DeepSeek API base URL | `https://api.deepseek.com` |
+| `DEEPSEEK_UPSTREAM_MODE` | DeepSeek upstream protocol: `openai` or `anthropic` | `openai` |
+| `OPENAI_API_KEY` | API key for OpenAI backend | — |
+| `OPENAI_BASE_URL` | OpenAI API base URL | `https://api.openai.com` |
+| `DEFAULT_BACKEND` | Default backend selection: `custom`, `deepseek`, `openai` | `custom` |
 | `FORCE_MODEL` | Force a specific model name | — |
-| `CUSTOM_UPSTREAM_MODE` | Upstream protocol: `openai` or `anthropic` | `openai` |
+| `CUSTOM_UPSTREAM_MODE` | Custom upstream protocol: `openai` or `anthropic` | `openai` |
 | `INLINE_IMAGE_POLICY` | Image handling: `preserve`, `omit`, `omit_inline`, `auto` | `preserve` |
+| `REASONING_CONTENT_POLICY` | Reasoning content handling: `never`, `preserve`, `auto` | `never` |
 | `CUSTOM_MODEL_PATTERN` | Regex pattern for custom backend model matching | — |
+| `DEEPSEEK_MODEL_PATTERN` | Regex pattern for DeepSeek model matching | `deepseek\|deep-seek` |
+| `OPENAI_MODEL_PATTERN` | Regex pattern for OpenAI model matching | `^(gpt-\|o1\|o3\|o4\|chatgpt)` |
+
+## Backend Mode Comparison
+
+The bridge supports two fundamentally different API modes. Choosing the right one depends on your needs:
+
+| Feature | Custom (OpenAI style) | DeepSeek Anthropic style |
+|---------|----------------------|--------------------------|
+| **Configuration** | `CUSTOM_API_KEY` + `CUSTOM_BASE_URL` | `DEEPSEEK_API_KEY` + `DEEPSEEK_UPSTREAM_MODE=anthropic` |
+| **Protocol conversion** | Anthropic → OpenAI (via bridge translation) | Pass-through (direct Anthropic API) |
+| **Tool calls** | ❌ Unsupported — web search, native tool use not available | ✅ Fully supported |
+| **Model selection** | More third-party providers (SiliconFlow, Moonshot, etc.) | Limited to DeepSeek official models |
+
+### Custom OpenAI API (`DEFAULT_BACKEND=custom`)
+
+When using third-party providers like SiliconFlow or Moonshot, the bridge converts Claude Science's Anthropic-format requests to OpenAI-compatible format. During this conversion, Anthropic-specific features — particularly **tool calls** — are lost. This means:
+
+- The **web search** tool in Claude Science will not function
+- Extended thinking is not available
+- Only basic text generation and code execution work
+
+**Recommended for**: Users who want access to a wide range of models from various providers and don't need web search.
+
+### DeepSeek Anthropic API (`DEFAULT_BACKEND=deepseek`, `DEEPSEEK_UPSTREAM_MODE=anthropic`)
+
+DeepSeek provides an official Anthropic-compatible API endpoint (`/anthropic/v1/messages`). When this mode is enabled, the bridge passes requests through **without format conversion**, preserving all Anthropic protocol features:
+
+- The **web search** tool in Claude Science works normally
+- Tool calls and function calling are fully supported
+- All Anthropic message features are preserved
+
+**Recommended for**: Users who need web search, tool use, or want the best compatibility with Claude Science features.
+
+> ⚠️ **Note**: When using `DEEPSEEK_UPSTREAM_MODE=anthropic`, the `thinking` block is automatically stripped from requests since DeepSeek's Anthropic API does not support extended thinking (`thinking.type: "auto"` is not a valid value). This does not affect normal functionality.
+
+### How to switch
+
+```bash
+# Option 1: Custom OpenAI API (wider model selection, no web search)
+CUSTOM_API_KEY=sk-xxx
+CUSTOM_BASE_URL=https://api.siliconflow.cn
+DEFAULT_BACKEND=custom
+
+# Option 2: DeepSeek Anthropic API (web search, tool support)
+DEEPSEEK_API_KEY=sk-xxx
+DEFAULT_BACKEND=deepseek
+DEEPSEEK_UPSTREAM_MODE=anthropic
+```
 
 For more detailed configuration instructions, please refer to the documentation in the [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge).
 
