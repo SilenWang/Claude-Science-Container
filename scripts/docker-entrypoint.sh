@@ -31,6 +31,7 @@ apply_config() {
 
     DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}" \
     DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL:-}" \
+    DEEPSEEK_UPSTREAM_MODE="${DEEPSEEK_UPSTREAM_MODE:-openai}" \
     OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
     OPENAI_BASE_URL="${OPENAI_BASE_URL:-}" \
     CUSTOM_API_KEY="${CUSTOM_API_KEY:-}" \
@@ -51,6 +52,7 @@ data = json.loads(open(path).read())
 mapping = {
     "DEEPSEEK_API_KEY": "deepseek_api_key",
     "DEEPSEEK_BASE_URL": "deepseek_base_url",
+    "DEEPSEEK_UPSTREAM_MODE": "deepseek_upstream_mode",
     "OPENAI_API_KEY": "openai_api_key",
     "OPENAI_BASE_URL": "openai_base_url",
     "CUSTOM_API_KEY": "custom_api_key",
