@@ -33,7 +33,7 @@ new_lines = []
 for line in lines:
     new_lines.append(line)
     if 'if \"max_tokens\" in out:' in line:
-        new_lines.append('    if \"thinking\" in out:\n')
+        new_lines.append('    if config.reasoning_content_policy == \"never\" and \"thinking\" in out:\n')
         new_lines.append('        del out[\"thinking\"]\n')
 with open(path, 'w') as f:
     f.writelines(new_lines)
