@@ -2,7 +2,7 @@
 name = "claude-science-container"
 version = "0.1.0"
 channels = ["conda-forge", "bioconda"]
-platforms = ["linux-64"]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
 
 [tasks]
 build-helper = { cmd = "CGO_ENABLED=0 go build -o launcher .", cwd = "helper" }
