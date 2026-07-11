@@ -46,7 +46,7 @@ func main() {
 
 	log.Printf("Fetching Claude Science URL from container '%s' ...", cfg.ContainerID)
 	cmd := fmt.Sprintf("docker exec %s claude-science url", cfg.ContainerID)
-	output, err := runRemoteCommand(client, cmd)
+	output, err := runRemoteCommand(cfg, cmd)
 	if err != nil {
 		log.Printf("Warning: could not fetch URL: %v", err)
 	} else {

@@ -12,14 +12,9 @@ import (
 )
 
 func dialSSH(cfg *Config) (*ssh.Client, error) {
-	keyData, err := os.ReadFile(cfg.SSHKey)
+	signer, err := loadSigner(cfg.SSHKey)
 	if err != nil {
-		return nil, fmt.Errorf("reading SSH key %s: %w", cfg.SSHKey, err)
-	}
-
-	signer, err := ssh.ParsePrivateKey(keyData)
-	if err != nil {
-		return nil, fmt.Errorf("parsing SSH key: %w", err)
+		return nil, err
 	}
 
 	sshCfg := &ssh.ClientConfig{
@@ -30,16 +25,44 @@ func dialSSH(cfg *Config) (*ssh.Client, error) {
 	}
 
 	addr := net.JoinHostPort(cfg.SSHHost, fmt.Sprintf("%d", cfg.SSHPort))
-	client, err := ssh.Dial("tcp", addr, sshCfg)
+
+	tcpConn, err := net.DialTimeout("tcp", addr, 15*time.Second)
 	if err != nil {
-		return nil, fmt.Errorf("SSH dial %s: %w", addr, err)
+		return nil, fmt.Errorf("TCP dial %s: %w", addr, err)
 	}
 
+	if tcp, ok := tcpConn.(*net.TCPConn); ok {
+		tcp.SetKeepAlive(true)
+		tcp.SetKeepAlivePeriod(15 * time.Second)
+		tcp.SetNoDelay(true)
+	}
+
+	conn, chans, reqs, err := ssh.NewClientConn(tcpConn, addr, sshCfg)
+	if err != nil {
+		tcpConn.Close()
+		return nil, fmt.Errorf("SSH handshake %s: %w", addr, err)
+	}
+
+	client := ssh.NewClient(conn, chans, reqs)
 	return client, nil
 }
 
+func loadSigner(keyPath string) (ssh.Signer, error) {
+	keyData, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading SSH key %s: %w", keyPath, err)
+	}
+
+	signer, err := ssh.ParsePrivateKey(keyData)
+	if err != nil {
+		return nil, fmt.Errorf("parsing SSH key: %w", err)
+	}
+
+	return signer, nil
+}
+
 func startKeepalive(client *ssh.Client) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -101,7 +124,13 @@ func handleForwardConn(client *ssh.Client, localConn net.Conn, remoteAddr string
 	<-done
 }
 
-func runRemoteCommand(client *ssh.Client, command string) (string, error) {
+func runRemoteCommand(cfg *Config, command string) (string, error) {
+	client, err := dialSSH(cfg)
+	if err != nil {
+		return "", fmt.Errorf("dialing SSH for command: %w", err)
+	}
+	defer client.Close()
+
 	session, err := client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("creating SSH session: %w", err)
