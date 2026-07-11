@@ -1,0 +1,11 @@
+{
+  "ssh_host": "your-server.com",
+  "ssh_port": 22,
+  "ssh_user": "root",
+  "ssh_key": "~/.ssh/id_rsa",
+  "container_id": "claude-science",
+  "port_forwards": [
+    { "local": 9876, "remote": 9876 },
+    { "local": 9981, "remote": 9981 }
+  ]
+}
