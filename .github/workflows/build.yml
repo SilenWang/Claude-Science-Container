@@ -6,16 +6,10 @@ on:
       - 'launcher*'
 
 jobs:
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform:
-          - linux-amd64
-          - linux-arm64
-          - darwin-amd64
-          - darwin-arm64
-          - windows-amd64
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -23,27 +17,8 @@ jobs:
         with:
           environments: default
 
-      - name: Build ${{ matrix.platform }}
-        run: pixi run build-${{ matrix.platform }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: launcher-${{ matrix.platform }}
-          path: |
-            helper/launcher-linux-amd64
-            helper/launcher-linux-arm64
-            helper/launcher-darwin-amd64
-            helper/launcher-darwin-arm64
-            helper/launcher-windows-amd64.exe
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
+      - name: Build all platforms
+        run: pixi run build
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -51,9 +26,9 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           files: |
-            launcher-linux-amd64/launcher-linux-amd64
-            launcher-linux-arm64/launcher-linux-arm64
-            launcher-darwin-amd64/launcher-darwin-amd64
-            launcher-darwin-arm64/launcher-darwin-arm64
-            launcher-windows-amd64/launcher-windows-amd64.exe
+            helper/launcher-linux-amd64
+            helper/launcher-linux-arm64
+            helper/launcher-darwin-amd64
+            helper/launcher-darwin-arm64
+            helper/launcher-windows-amd64.exe
           generate_release_notes: true
