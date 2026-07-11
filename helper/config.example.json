@@ -1,9 +1,15 @@
 {
-  "ssh_host": "your-server.com",
+  "_info": "复制此文件为 config.json 并修改各项配置",
+  "_info_ssh": "远程服务器 SSH 连接信息",
+  "ssh_host": "192.168.1.100",
   "ssh_port": 22,
   "ssh_user": "root",
-  "ssh_key": "~/.ssh/id_rsa",
+  "ssh_key": "/home/user/.ssh/id_rsa",
+
+  "_info_container": "运行 claude-science 的 Docker 容器名称或 ID",
   "container_id": "claude-science",
+
+  "_info_forwards": "将远程容器的端口转发到本地，可按需增减条目",
   "port_forwards": [
     { "local": 9876, "remote": 9876 },
     { "local": 9981, "remote": 9981 }
