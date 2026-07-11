@@ -5,10 +5,7 @@ channels = ["conda-forge", "bioconda"]
 platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
 
 [tasks]
-build-helper = { cmd = "CGO_ENABLED=0 go build -o launcher .", cwd = "helper" }
-run-helper = { cmd = "CGO_ENABLED=0 go run .", cwd = "helper" }
-tidy-helper = { cmd = "go mod tidy", cwd = "helper" }
-vet-helper = { cmd = "CGO_ENABLED=0 go vet .", cwd = "helper" }
+build = { cmd = "CGO_ENABLED=0 go build -o launcher .", cwd = "helper" }
 
 [dependencies]
 go = ">=1.26.4,<2"
