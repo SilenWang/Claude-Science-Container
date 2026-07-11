@@ -72,6 +72,52 @@ I am not a professional software developer, so the reasons for some of the featu
    - Check the container logs for the login URL, you will find something like `http://localhost:9981/?nonce=token`, use this to enter webui of Claude Science in browser.
 
 
+## Startup Assistant (helper)
+
+A Go-based SSH launcher tool that connects to a remote server running the container, sets up port forwarding, automatically retrieves the login URL, and opens the browser.
+
+### Quick Start
+
+```bash
+# Build (requires Go or use pixi)
+pixi run build
+# or: cd helper && CGO_ENABLED=0 go build -o launcher .
+
+# Configure
+cp helper/config.example.json helper/config.json
+# Edit config.json with your SSH server details
+
+# Run
+./helper/launcher
+```
+
+### Configuration
+
+| Field | Description |
+|-------|-------------|
+| `ssh_host` | Remote server hostname/IP |
+| `ssh_port` | SSH port (default: 22) |
+| `ssh_user` | SSH user (default: root) |
+| `ssh_key` | Path to SSH private key |
+| `container_id` | Docker container name/ID (default: claude-science) |
+| `port_forwards` | List of `{local, remote}` port mappings |
+
+The launcher automatically:
+- Connects via SSH and sets up port forwarding (default: 9876, 9981)
+- Fetches the Claude Science login URL from the container
+- Opens the URL in your default browser
+- Reconnects automatically on connection loss
+
+### Manual Usage (without helper)
+
+If connecting via SSH directly:
+
+```bash
+ssh -L 9876:127.0.0.1:9876 -L 9981:127.0.0.1:9981 user@your-server
+# Then fetch the URL from the container:
+docker exec claude-science claude-science url
+```
+
 ## Configuration
 
 All configuration is done via environment variables in `.env`:
