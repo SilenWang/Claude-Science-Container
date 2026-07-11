@@ -33,7 +33,7 @@ func dialSSH(cfg *Config) (*ssh.Client, error) {
 
 	if tcp, ok := tcpConn.(*net.TCPConn); ok {
 		tcp.SetKeepAlive(true)
-		tcp.SetKeepAlivePeriod(15 * time.Second)
+		tcp.SetKeepAlivePeriod(10 * time.Second)
 		tcp.SetNoDelay(true)
 	}
 
@@ -43,8 +43,7 @@ func dialSSH(cfg *Config) (*ssh.Client, error) {
 		return nil, fmt.Errorf("SSH handshake %s: %w", addr, err)
 	}
 
-	client := ssh.NewClient(conn, chans, reqs)
-	return client, nil
+	return ssh.NewClient(conn, chans, reqs), nil
 }
 
 func loadSigner(keyPath string) (ssh.Signer, error) {
@@ -61,85 +60,91 @@ func loadSigner(keyPath string) (ssh.Signer, error) {
 	return signer, nil
 }
 
-func startKeepalive(client *ssh.Client) {
-	ticker := time.NewTicker(20 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		_, _, err := client.SendRequest("keepalive@openssh.com", true, nil)
-		if err != nil {
-			log.Printf("SSH keepalive error: %v", err)
-			return
-		}
-	}
-}
-
-func forwardPort(client *ssh.Client, localPort, remotePort int) error {
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
-	if err != nil {
-		return fmt.Errorf("listening on local :%d: %w", localPort, err)
-	}
-
-	remoteAddr := fmt.Sprintf("127.0.0.1:%d", remotePort)
-
+func startKeepalive(client *ssh.Client) chan struct{} {
+	done := make(chan struct{})
 	go func() {
-		defer listener.Close()
-
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
 		for {
-			localConn, err := listener.Accept()
-			if err != nil {
-				log.Printf("Port forward accept error on :%d: %v", localPort, err)
+			select {
+			case <-ticker.C:
+				if _, _, err := client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+					log.Printf("SSH keepalive lost: %v", err)
+					close(done)
+					return
+				}
+			case <-done:
 				return
 			}
-
-			go handleForwardConn(client, localConn, remoteAddr, localPort)
 		}
 	}()
-
-	return nil
+	return done
 }
 
-func handleForwardConn(client *ssh.Client, localConn net.Conn, remoteAddr string, localPort int) {
+func startForwarding(client *ssh.Client, forwards []PortForward) (func(), error) {
+	var listeners []net.Listener
+	for _, pf := range forwards {
+		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", pf.Local))
+		if err != nil {
+			for _, l := range listeners {
+				l.Close()
+			}
+			return nil, fmt.Errorf("listen :%d: %w", pf.Local, err)
+		}
+		listeners = append(listeners, listener)
+		remoteAddr := fmt.Sprintf("127.0.0.1:%d", pf.Remote)
+		go acceptLoop(client, listener, remoteAddr, pf.Local)
+	}
+
+	cleanup := func() {
+		for _, l := range listeners {
+			l.Close()
+		}
+	}
+	return cleanup, nil
+}
+
+func acceptLoop(client *ssh.Client, listener net.Listener, remoteAddr string, localPort int) {
+	for {
+		localConn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		go handleForward(client, localConn, remoteAddr, localPort)
+	}
+}
+
+func handleForward(client *ssh.Client, localConn net.Conn, remoteAddr string, localPort int) {
 	defer localConn.Close()
 
 	remoteConn, err := client.Dial("tcp", remoteAddr)
 	if err != nil {
-		log.Printf("SSH dial remote %s (forward :%d): %v", remoteAddr, localPort, err)
 		return
 	}
 	defer remoteConn.Close()
 
 	done := make(chan struct{}, 2)
-
-	go func() {
-		io.Copy(remoteConn, localConn)
-		done <- struct{}{}
-	}()
-
-	go func() {
-		io.Copy(localConn, remoteConn)
-		done <- struct{}{}
-	}()
-
+	go func() { io.Copy(remoteConn, localConn); done <- struct{}{} }()
+	go func() { io.Copy(localConn, remoteConn); done <- struct{}{} }()
 	<-done
 }
 
 func runRemoteCommand(cfg *Config, command string) (string, error) {
 	client, err := dialSSH(cfg)
 	if err != nil {
-		return "", fmt.Errorf("dialing SSH for command: %w", err)
+		return "", fmt.Errorf("SSH dial for command: %w", err)
 	}
 	defer client.Close()
 
 	session, err := client.NewSession()
 	if err != nil {
-		return "", fmt.Errorf("creating SSH session: %w", err)
+		return "", fmt.Errorf("SSH session: %w", err)
 	}
 	defer session.Close()
 
 	output, err := session.CombinedOutput(command)
 	if err != nil {
-		return "", fmt.Errorf("executing remote command: %w (output: %s)", err, string(output))
+		return "", fmt.Errorf("remote command: %w (output: %s)", err, string(output))
 	}
 
 	return string(output), nil

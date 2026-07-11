@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -25,55 +26,78 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	log.Printf("Connecting to %s@%s:%d ...", cfg.SSHUser, cfg.SSHHost, cfg.SSHPort)
-	client, err := dialSSH(cfg)
-	if err != nil {
-		log.Fatalf("Failed to establish SSH connection: %v", err)
-	}
-	defer client.Close()
-
-	log.Printf("SSH connection established to %s", cfg.SSHHost)
-
-	go startKeepalive(client)
-
-	log.Printf("Setting up port forwarding ...")
-	for _, pf := range cfg.PortForwards {
-		if err := forwardPort(client, pf.Local, pf.Remote); err != nil {
-			log.Fatalf("Failed to set up port forward :%d -> :%d: %v", pf.Local, pf.Remote, err)
-		}
-		log.Printf("  Port forward active: 127.0.0.1:%d -> remote:%d", pf.Local, pf.Remote)
-	}
-
 	log.Printf("Fetching Claude Science URL from container '%s' ...", cfg.ContainerID)
 	cmd := fmt.Sprintf("docker exec %s claude-science url", cfg.ContainerID)
-	output, err := runRemoteCommand(cfg, cmd)
-	if err != nil {
+	if output, err := runRemoteCommand(cfg, cmd); err != nil {
 		log.Printf("Warning: could not fetch URL: %v", err)
+	} else if url := parseURL(output); url != "" {
+		log.Printf("=== Claude Science Login URL ===")
+		log.Printf("  %s", url)
+		log.Printf("================================")
+		openBrowser(url)
 	} else {
-		url := parseURL(output)
-		if url != "" {
-			log.Printf("=== Claude Science Login URL ===")
-			log.Printf("  %s", url)
-			log.Printf("================================")
-			openBrowser(url)
-		} else {
-			log.Printf("Could not extract URL from output: %s", strings.TrimSpace(output))
-		}
+		log.Printf("Could not extract URL from output: %s", strings.TrimSpace(output))
 	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	log.Printf("Port forwarding active. Press Ctrl+C to stop.")
-	<-sigCh
+	forwardLoop(cfg, sigCh)
 
 	log.Printf("Shutting down ...")
 }
 
+func forwardLoop(cfg *Config, sigCh chan os.Signal) {
+	for {
+		select {
+		case <-sigCh:
+			return
+		default:
+		}
+
+		log.Printf("Connecting to %s@%s:%d ...", cfg.SSHUser, cfg.SSHHost, cfg.SSHPort)
+		client, err := dialSSH(cfg)
+		if err != nil {
+			log.Printf("SSH connection failed, retry in 3s: %v", err)
+			select {
+			case <-sigCh:
+				return
+			case <-time.After(3 * time.Second):
+			}
+			continue
+		}
+		log.Printf("SSH connection established")
+
+		kaDone := startKeepalive(client)
+		cleanup, err := startForwarding(client, cfg.PortForwards)
+		if err != nil {
+			log.Printf("Port forwarding setup failed: %v", err)
+			client.Close()
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		for _, pf := range cfg.PortForwards {
+			log.Printf("  Forward: 127.0.0.1:%d -> remote:%d", pf.Local, pf.Remote)
+		}
+
+		select {
+		case <-sigCh:
+			cleanup()
+			client.Close()
+			return
+		case <-kaDone:
+			log.Printf("Connection lost, reconnecting in 3s ...")
+			cleanup()
+			client.Close()
+			time.Sleep(3 * time.Second)
+		}
+	}
+}
+
 func parseURL(output string) string {
 	re := regexp.MustCompile(`https?://[^\s"']+`)
-	matches := re.FindString(output)
-	return strings.TrimSpace(matches)
+	return strings.TrimSpace(re.FindString(output))
 }
 
 func openBrowser(url string) {
@@ -97,8 +121,5 @@ func openBrowser(url string) {
 		log.Printf("Warning: could not open browser: %v", err)
 		return
 	}
-
-	if err := proc.Process.Release(); err != nil {
-		log.Printf("Warning: could not release browser process: %v", err)
-	}
+	proc.Process.Release()
 }
