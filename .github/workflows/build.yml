@@ -1,0 +1,34 @@
+name: BUILD
+
+on:
+  push:
+    tags:
+      - 'launcher*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.8.0
+        with:
+          environments: default
+
+      - name: Build all platforms
+        run: pixi run build
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            helper/launcher-linux-amd64
+            helper/launcher-linux-arm64
+            helper/launcher-darwin-amd64
+            helper/launcher-darwin-arm64
+            helper/launcher-windows-amd64.exe
+          generate_release_notes: true

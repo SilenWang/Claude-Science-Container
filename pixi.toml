@@ -4,8 +4,52 @@ version = "0.1.0"
 channels = ["conda-forge", "bioconda"]
 platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
 
-[tasks]
-build = { cmd = "CGO_ENABLED=0 go build -o launcher .", cwd = "helper" }
+[tasks.clean_linux]
+cmd = "rm -f launcher-linux-{{ arch }}"
+args = [{ arg = "arch", default = "amd64" }]
+cwd = "helper"
+
+[tasks.build_linux_arch]
+cmd = "GOOS=linux GOARCH={{ arch }} go build -o launcher-linux-{{ arch }} ."
+args = [{ arg = "arch", default = "amd64" }]
+cwd = "helper"
+depends-on = [{ task = "clean_linux", args = ["{{ arch }}"] }]
+
+[tasks.clean_darwin]
+cmd = "rm -f launcher-darwin-{{ arch }}"
+args = [{ arg = "arch", default = "amd64" }]
+cwd = "helper"
+
+[tasks.build_darwin_arch]
+cmd = "GOOS=darwin GOARCH={{ arch }} go build -o launcher-darwin-{{ arch }} ."
+args = [{ arg = "arch", default = "amd64" }]
+cwd = "helper"
+depends-on = [{ task = "clean_darwin", args = ["{{ arch }}"] }]
+
+[tasks.clean_windows]
+cmd = "rm -f launcher-windows-{{ arch }}.exe"
+args = [{ arg = "arch", default = "amd64" }]
+cwd = "helper"
+
+[tasks.build_windows_arch]
+cmd = "GOOS=windows GOARCH={{ arch }} go build -o launcher-windows-{{ arch }}.exe ."
+args = [{ arg = "arch", default = "amd64" }]
+cwd = "helper"
+depends-on = [{ task = "clean_windows", args = ["{{ arch }}"] }]
+
+[tasks.build]
+cmd = "echo 'Build Done'"
+depends-on = [
+    { task = "build_linux_arch", args = ["amd64"] },
+    { task = "build_linux_arch", args = ["arm64"] },
+    { task = "build_darwin_arch", args = ["amd64"] },
+    { task = "build_darwin_arch", args = ["arm64"] },
+    { task = "build_windows_arch", args = ["amd64"] },
+]
+cwd = "helper"
+
+[activation.env]
+CGO_ENABLED = "0"
 
 [dependencies]
 go = ">=1.26.4,<2"
