@@ -5,7 +5,6 @@
   "ssh_key": "/home/user/.ssh/id_rsa",
   "container_id": "claude-science",
   "port_forwards": [
-    { "local": 9876, "remote": 9876 },
     { "local": 9981, "remote": 9981 }
   ]
 }

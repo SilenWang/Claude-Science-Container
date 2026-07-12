@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     patch \
+    p7zip \
     python3 \
     python3-venv \
     python3-pip \
@@ -39,6 +40,6 @@ COPY scripts/supervisord.conf /etc/supervisor/conf.d/claude-science.conf
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-EXPOSE 9876 9981
+EXPOSE 9981
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
