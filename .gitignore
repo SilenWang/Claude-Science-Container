@@ -4,3 +4,4 @@ __pycache__/
 .pixi/
 helper/launcher*
 helper/config.json
+*.syso
