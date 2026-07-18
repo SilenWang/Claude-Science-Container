@@ -36,7 +36,7 @@ cmd = "go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@late
 cwd = "helper"
 
 [tasks.build_windows_arch]
-cmd = "$(go env GOPATH)/bin/goversioninfo -o resource_windows.syso versioninfo.json && GOOS=windows GOARCH={{ arch }} go build -ldflags=\"-s -w\" -o launcher-windows-{{ arch }}.exe . && rm -f resource_windows.syso"
+cmd = "goversioninfo -o resource_windows.syso versioninfo.json && GOOS=windows GOARCH={{ arch }} go build -ldflags=\"-s -w\" -o launcher-windows-{{ arch }}.exe . && rm -f resource_windows.syso"
 args = [{ arg = "arch", default = "amd64" }]
 cwd = "helper"
 depends-on = [
@@ -57,6 +57,7 @@ cwd = "helper"
 
 [activation.env]
 CGO_ENABLED = "0"
+PATH = "$HOME/go/bin:$PATH"
 
 [dependencies]
 go = ">=1.26.4,<2"
