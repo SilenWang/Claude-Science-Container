@@ -1,4 +1,4 @@
-FROM ubuntu:24.04
+FROM ghcr.io/prefix-dev/pixi:0.67.2-noble-cuda-13.0.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     socat \
     curl \
     git \
+    gh \
     patch \
     p7zip \
     python3 \
