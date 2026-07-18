@@ -1,7 +1,10 @@
-FROM ubuntu:24.04
+FROM ghcr.io/prefix-dev/pixi:0.67.2-noble-cuda-13.0.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+ENV LANG=zh_CN.UTF-8
+ENV LANGUAGE=zh_CN:zh
+ENV LC_ALL=zh_CN.UTF-8
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -9,12 +12,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     socat \
     curl \
     git \
+    gh \
     patch \
     p7zip \
     python3 \
     python3-venv \
     python3-pip \
     supervisor \
+    locales \
+    fonts-noto-cjk \
+    && locale-gen zh_CN.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
