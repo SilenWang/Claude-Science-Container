@@ -1,4 +1,4 @@
-FROM ghcr.io/prefix-dev/pixi:0.67.2-noble-cuda-13.0.0
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
