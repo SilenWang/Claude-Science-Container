@@ -1,0 +1,38 @@
+{
+  "FixedFileInfo": {
+    "FileVersion": {
+      "Major": 0,
+      "Minor": 1,
+      "Patch": 0,
+      "Build": 0
+    },
+    "ProductVersion": {
+      "Major": 0,
+      "Minor": 1,
+      "Patch": 0,
+      "Build": 0
+    },
+    "FileFlagsMask": "3f",
+    "FileFlags": "0",
+    "FileOS": "40004",
+    "FileType": "01",
+    "FileSubType": "0"
+  },
+  "StringFileInfo": {
+    "Comments": "SSH port forwarding launcher for Claude Science Container",
+    "CompanyName": "Claude-Science-Container",
+    "FileDescription": "Claude Science Container Launcher",
+    "FileVersion": "0.1.0",
+    "InternalName": "launcher",
+    "LegalCopyright": "MIT License",
+    "OriginalFilename": "launcher-windows-amd64.exe",
+    "ProductName": "Claude Science Container Launcher",
+    "ProductVersion": "0.1.0"
+  },
+  "VarFileInfo": {
+    "Translation": {
+      "LangID": "0804",
+      "CharsetID": "04B0"
+    }
+  }
+}
