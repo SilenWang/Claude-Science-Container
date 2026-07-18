@@ -2,6 +2,9 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+ENV LANG=zh_CN.UTF-8
+ENV LANGUAGE=zh_CN:zh
+ENV LC_ALL=zh_CN.UTF-8
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -15,6 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     python3-pip \
     supervisor \
+    locales \
+    fonts-noto-cjk \
+    && locale-gen zh_CN.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
