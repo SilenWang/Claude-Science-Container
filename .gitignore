@@ -5,3 +5,4 @@ __pycache__/
 helper/launcher*
 helper/config.json
 *.syso
+data
