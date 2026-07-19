@@ -136,6 +136,9 @@ All configuration is done via environment variables in `.env`:
 | `CUSTOM_UPSTREAM_MODE` | Custom upstream protocol: `openai` or `anthropic` | `openai` |
 | `INLINE_IMAGE_POLICY` | Image handling: `preserve`, `omit`, `omit_inline`, `auto` | `preserve` |
 | `REASONING_CONTENT_POLICY` | Reasoning content handling: `never`, `preserve`, `auto` | `never` |
+| `MODEL_ALIASES` | JSON array of model aliases for multi-model support | — |
+| `MODEL_LIST_MODE` | Model list mode: `aliases` (auto-set when MODEL_ALIASES is used) | — |
+| `MODEL_MENU_STRATEGY` | Model menu strategy: `claude_compatible` (auto-set when MODEL_ALIASES is used) | — |
 | `CUSTOM_MODEL_PATTERN` | Regex pattern for custom backend model matching | — |
 | `DEEPSEEK_MODEL_PATTERN` | Regex pattern for DeepSeek model matching | `deepseek\|deep-seek` |
 | `OPENAI_MODEL_PATTERN` | Regex pattern for OpenAI model matching | `^(gpt-\|o1\|o3\|o4\|chatgpt)` |
@@ -199,6 +202,47 @@ For more detailed configuration instructions, please refer to the documentation 
 ## Data Persistence
 
 Container data (Claude Science configuration and sessions) is stored in a Docker volume named `cs-data`, mounted at `/root/.claude-science`.
+
+## Multi-Model Configuration (model_aliases)
+
+When using the DeepSeek official API in Anthropic-compatible mode, you can configure multiple models (e.g., DeepSeek Flash and Pro) to appear in Claude Science's model selector simultaneously. This uses the bridge's `model_aliases` mechanism instead of `FORCE_MODEL`.
+
+### How it works
+
+Set `MODEL_ALIASES` as a JSON array where each entry maps a Claude-compatible ID to a real backend model. The entrypoint automatically sets `model_list_mode=aliases` and `model_menu_strategy=claude_compatible` when `MODEL_ALIASES` is provided.
+
+Claude Science's model selector will show the `display_name` from each alias, while actual requests use the mapped `model` value on the configured `backend`.
+
+### Configuration example
+
+```ini
+DEEPSEEK_API_KEY=sk-xxx
+DEFAULT_BACKEND=deepseek
+DEEPSEEK_UPSTREAM_MODE=anthropic
+MODEL_ALIASES='[{"id":"claude-haiku-4-5","display_name":"DeepSeek Flash","backend":"deepseek","model":"deepseek-chat"},{"id":"claude-sonnet-5","display_name":"DeepSeek Pro","backend":"deepseek","model":"deepseek-chat"}]'
+```
+
+With this configuration, the model selector shows **DeepSeek Flash** and **DeepSeek Pro** as two options. When `MODEL_ALIASES` is set, `FORCE_MODEL` is ignored (the alias mappings take precedence).
+
+### Alias entry fields
+
+| Field | Description |
+|-------|-------------|
+| `id` | Claude-compatible model ID (e.g., `claude-sonnet-5`, `claude-haiku-4-5`) |
+| `display_name` | Name shown in Claude Science's model selector |
+| `backend` | Backend to use: `deepseek`, `openai`, or `custom` |
+| `model` | The real model name sent to the API |
+
+### Without multi-model (single model)
+
+If you only need a single model, simply keep using `FORCE_MODEL` as before — no need to set `MODEL_ALIASES`.
+
+```ini
+DEEPSEEK_API_KEY=sk-xxx
+DEFAULT_BACKEND=deepseek
+DEEPSEEK_UPSTREAM_MODE=anthropic
+FORCE_MODEL=deepseek-chat
+```
 
 ## Acknowledgements
 

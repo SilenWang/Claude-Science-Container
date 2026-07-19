@@ -40,9 +40,13 @@ apply_config() {
     FORCE_MODEL="${FORCE_MODEL:-}" \
     CUSTOM_UPSTREAM_MODE="${CUSTOM_UPSTREAM_MODE:-openai}" \
     INLINE_IMAGE_POLICY="${INLINE_IMAGE_POLICY:-preserve}" \
+    REASONING_CONTENT_POLICY="${REASONING_CONTENT_POLICY:-auto}" \
     DEEPSEEK_MODEL_PATTERN="${DEEPSEEK_MODEL_PATTERN:-}" \
     OPENAI_MODEL_PATTERN="${OPENAI_MODEL_PATTERN:-}" \
     CUSTOM_MODEL_PATTERN="${CUSTOM_MODEL_PATTERN:-}" \
+    MODEL_ALIASES="${MODEL_ALIASES:-}" \
+    MODEL_LIST_MODE="${MODEL_LIST_MODE:-}" \
+    MODEL_MENU_STRATEGY="${MODEL_MENU_STRATEGY:-}" \
     PROXY_HOST="0.0.0.0" \
     PROXY_PORT="9876" \
     "$py" - "$cfg" <<'PY'
@@ -61,9 +65,12 @@ mapping = {
     "FORCE_MODEL": "force_model",
     "CUSTOM_UPSTREAM_MODE": "custom_upstream_mode",
     "INLINE_IMAGE_POLICY": "inline_image_policy",
+    "REASONING_CONTENT_POLICY": "reasoning_content_policy",
     "DEEPSEEK_MODEL_PATTERN": "deepseek_model_pattern",
     "OPENAI_MODEL_PATTERN": "openai_model_pattern",
     "CUSTOM_MODEL_PATTERN": "custom_model_pattern",
+    "MODEL_LIST_MODE": "model_list_mode",
+    "MODEL_MENU_STRATEGY": "model_menu_strategy",
     "PROXY_HOST": "proxy_host",
     "PROXY_PORT": "proxy_port"
 }
@@ -73,6 +80,16 @@ for env_k, cfg_k in mapping.items():
     if v:
         data[cfg_k] = int(v) if cfg_k == "proxy_port" else v
         changed.append(cfg_k)
+aliases_json = os.environ.get("MODEL_ALIASES")
+if aliases_json:
+    try:
+        aliases = json.loads(aliases_json)
+        data["model_aliases"] = aliases
+        data["model_list_mode"] = data.get("model_list_mode") or "aliases"
+        data["model_menu_strategy"] = data.get("model_menu_strategy") or "claude_compatible"
+        changed.append("model_aliases")
+    except json.JSONDecodeError:
+        print("WARNING: MODEL_ALIASES is not valid JSON, skipping")
 if changed:
     open(path, "w").write(json.dumps(data, indent=2) + "\n")
     print(f"Applied config: {', '.join(changed)}")
