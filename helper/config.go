@@ -19,6 +19,7 @@ type Target struct {
 	SSHUser      string        `json:"ssh_user"`
 	SSHKey       string        `json:"ssh_key"`
 	ContainerID  string        `json:"container_id"`
+	Command      string        `json:"command"`
 	PortForwards []PortForward `json:"port_forwards"`
 }
 
@@ -30,7 +31,7 @@ func defaultTarget() Target {
 	return Target{
 		SSHPort:     22,
 		SSHUser:     "root",
-		ContainerID: "claude-science",
+		Command:     "claude-science url",
 		PortForwards: []PortForward{
 			{Local: 9876, Remote: 9876},
 			{Local: 9981, Remote: 9981},
@@ -45,8 +46,8 @@ func applyDefaults(t *Target) {
 	if t.SSHUser == "" {
 		t.SSHUser = "root"
 	}
-	if t.ContainerID == "" {
-		t.ContainerID = "claude-science"
+	if t.Command == "" {
+		t.Command = "claude-science url"
 	}
 	if len(t.PortForwards) == 0 {
 		t.PortForwards = []PortForward{

@@ -31,8 +31,11 @@ func main() {
 		log.Fatal("No target selected")
 	}
 
-	log.Printf("Fetching Claude Science URL from container '%s' ...", target.ContainerID)
-	cmd := fmt.Sprintf("docker exec %s claude-science url", target.ContainerID)
+	cmd := target.Command
+	if target.ContainerID != "" {
+		cmd = fmt.Sprintf("docker exec %s %s", target.ContainerID, target.Command)
+	}
+	log.Printf("Running command on %s@%s: %s", target.SSHUser, target.SSHHost, cmd)
 	if output, err := runRemoteCommand(target, cmd); err != nil {
 		log.Printf("Warning: could not fetch URL: %v", err)
 	} else if url := parseURL(output); url != "" {
@@ -63,7 +66,11 @@ func selectTarget(targets []Target) *Target {
 		if label == "" {
 			label = fmt.Sprintf("%s@%s:%d", t.SSHUser, t.SSHHost, t.SSHPort)
 		}
-		fmt.Printf("  [%d] %s — %s container %s", i+1, label, t.SSHHost, t.ContainerID)
+		containerInfo := ""
+		if t.ContainerID != "" {
+			containerInfo = fmt.Sprintf(" (container: %s)", t.ContainerID)
+		}
+		fmt.Printf("  [%d] %s — %s%s", i+1, label, t.SSHHost, containerInfo)
 		if len(t.PortForwards) > 0 {
 			fmt.Printf(" (forwards: ")
 			for j, pf := range t.PortForwards {
