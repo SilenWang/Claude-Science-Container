@@ -12,7 +12,8 @@ type PortForward struct {
 	Remote int `json:"remote"`
 }
 
-type Config struct {
+type Target struct {
+	Name         string        `json:"name"`
 	SSHHost      string        `json:"ssh_host"`
 	SSHPort      int           `json:"ssh_port"`
 	SSHUser      string        `json:"ssh_user"`
@@ -21,8 +22,12 @@ type Config struct {
 	PortForwards []PortForward `json:"port_forwards"`
 }
 
-func DefaultConfig() Config {
-	return Config{
+type multiConfig struct {
+	Targets []Target `json:"targets"`
+}
+
+func defaultTarget() Target {
+	return Target{
 		SSHPort:     22,
 		SSHUser:     "root",
 		ContainerID: "claude-science",
@@ -33,9 +38,39 @@ func DefaultConfig() Config {
 	}
 }
 
-func LoadConfig(path string) (*Config, error) {
-	cfg := DefaultConfig()
+func applyDefaults(t *Target) {
+	if t.SSHPort == 0 {
+		t.SSHPort = 22
+	}
+	if t.SSHUser == "" {
+		t.SSHUser = "root"
+	}
+	if t.ContainerID == "" {
+		t.ContainerID = "claude-science"
+	}
+	if len(t.PortForwards) == 0 {
+		t.PortForwards = []PortForward{
+			{Local: 9876, Remote: 9876},
+			{Local: 9981, Remote: 9981},
+		}
+	}
+}
 
+func validateTarget(t *Target, idx int) error {
+	prefix := ""
+	if idx >= 0 {
+		prefix = fmt.Sprintf("target[%d]: ", idx)
+	}
+	if t.SSHHost == "" {
+		return fmt.Errorf("%sssh_host is required", prefix)
+	}
+	if t.SSHKey == "" {
+		return fmt.Errorf("%sssh_key is required", prefix)
+	}
+	return nil
+}
+
+func LoadConfig(path string) ([]Target, error) {
 	if path == "" {
 		return nil, fmt.Errorf("config path is required")
 	}
@@ -50,16 +85,26 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("reading config file %s: %w", absPath, err)
 	}
 
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	var multi multiConfig
+	if err := json.Unmarshal(data, &multi); err == nil && len(multi.Targets) > 0 {
+		for i := range multi.Targets {
+			applyDefaults(&multi.Targets[i])
+			if err := validateTarget(&multi.Targets[i], i); err != nil {
+				return nil, err
+			}
+		}
+		return multi.Targets, nil
+	}
+
+	var legacy Target
+	if err := json.Unmarshal(data, &legacy); err != nil {
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 
-	if cfg.SSHHost == "" {
-		return nil, fmt.Errorf("ssh_host is required")
-	}
-	if cfg.SSHKey == "" {
-		return nil, fmt.Errorf("ssh_key is required")
+	applyDefaults(&legacy)
+	if err := validateTarget(&legacy, -1); err != nil {
+		return nil, err
 	}
 
-	return &cfg, nil
+	return []Target{legacy}, nil
 }

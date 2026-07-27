@@ -11,20 +11,20 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func dialSSH(cfg *Config) (*ssh.Client, error) {
-	signer, err := loadSigner(cfg.SSHKey)
+func dialSSH(target *Target) (*ssh.Client, error) {
+	signer, err := loadSigner(target.SSHKey)
 	if err != nil {
 		return nil, err
 	}
 
 	sshCfg := &ssh.ClientConfig{
-		User:            cfg.SSHUser,
+		User:            target.SSHUser,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         15 * time.Second,
 	}
 
-	addr := net.JoinHostPort(cfg.SSHHost, fmt.Sprintf("%d", cfg.SSHPort))
+	addr := net.JoinHostPort(target.SSHHost, fmt.Sprintf("%d", target.SSHPort))
 
 	tcpConn, err := net.DialTimeout("tcp", addr, 15*time.Second)
 	if err != nil {
@@ -129,8 +129,8 @@ func handleForward(client *ssh.Client, localConn net.Conn, remoteAddr string, lo
 	<-done
 }
 
-func runRemoteCommand(cfg *Config, command string) (string, error) {
-	client, err := dialSSH(cfg)
+func runRemoteCommand(target *Target, command string) (string, error) {
+	client, err := dialSSH(target)
 	if err != nil {
 		return "", fmt.Errorf("SSH dial for command: %w", err)
 	}

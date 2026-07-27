@@ -1,10 +1,26 @@
 {
-  "ssh_host": "192.168.1.100",
-  "ssh_port": 22,
-  "ssh_user": "root",
-  "ssh_key": "/home/user/.ssh/id_rsa",
-  "container_id": "claude-science",
-  "port_forwards": [
-    { "local": 9981, "remote": 9981 }
+  "targets": [
+    {
+      "name": "production",
+      "ssh_host": "192.168.1.100",
+      "ssh_port": 22,
+      "ssh_user": "root",
+      "ssh_key": "/home/user/.ssh/id_rsa",
+      "container_id": "claude-science",
+      "port_forwards": [
+        { "local": 9981, "remote": 9981 }
+      ]
+    },
+    {
+      "name": "staging",
+      "ssh_host": "192.168.1.200",
+      "ssh_port": 22,
+      "ssh_user": "root",
+      "ssh_key": "/home/user/.ssh/id_rsa",
+      "container_id": "claude-science-staging",
+      "port_forwards": [
+        { "local": 9982, "remote": 9981 }
+      ]
+    }
   ]
 }
