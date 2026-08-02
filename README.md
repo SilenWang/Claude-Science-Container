@@ -146,6 +146,25 @@ All configuration is done via environment variables in `.env`:
 | `IMAGE_FALLBACK_BACKEND` | Backend used for image fallback: `deepseek`, `openai`, `custom` | — |
 | `IMAGE_FALLBACK_MODEL` | Vision model used for image requests (e.g. Kimi K2.6 on SiliconFlow) | — |
 
+## Nvidia GPU Support
+
+The container supports Nvidia GPU passthrough so Claude Science (Electron/Chromium) can use hardware-accelerated rendering on hosts with an Nvidia GPU.
+
+### Host prerequisites
+
+- An Nvidia GPU with a recent driver installed on the host
+- [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed and the `nvidia` runtime registered with Docker (`sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`)
+
+### What the image includes
+
+- NVIDIA Container Toolkit installed inside the container (`nvidia-smi` is available to verify GPU visibility)
+- GLVND / EGL / Vulkan userspace libraries so Chromium can render via the injected driver
+- `NVIDIA_VISIBLE_DEVICES=all` and `NVIDIA_DRIVER_CAPABILITIES=all` set by default (overridable via `.env`)
+
+### Enable / disable
+
+The compose file reserves all GPUs (`driver: nvidia`, `count: all`, capabilities `[gpu]`). To run on a host **without** an Nvidia GPU, remove the `deploy.resources.reservations.devices` block from `docker-compose.yml` — otherwise `docker compose up` will fail to find the `nvidia` device driver.
+
 ## Backend Mode Comparison
 
 The bridge supports two fundamentally different API modes. Choosing the right one depends on your needs:
