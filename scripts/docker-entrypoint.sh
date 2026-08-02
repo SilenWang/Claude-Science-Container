@@ -44,6 +44,9 @@ apply_config() {
     DEEPSEEK_MODEL_PATTERN="${DEEPSEEK_MODEL_PATTERN:-}" \
     OPENAI_MODEL_PATTERN="${OPENAI_MODEL_PATTERN:-}" \
     CUSTOM_MODEL_PATTERN="${CUSTOM_MODEL_PATTERN:-}" \
+    IMAGE_FALLBACK_MODE="${IMAGE_FALLBACK_MODE:-auto}" \
+    IMAGE_FALLBACK_BACKEND="${IMAGE_FALLBACK_BACKEND:-}" \
+    IMAGE_FALLBACK_MODEL="${IMAGE_FALLBACK_MODEL:-}" \
     MODEL_ALIASES="${MODEL_ALIASES:-}" \
     MODEL_LIST_MODE="${MODEL_LIST_MODE:-}" \
     MODEL_MENU_STRATEGY="${MODEL_MENU_STRATEGY:-}" \
@@ -69,6 +72,9 @@ mapping = {
     "DEEPSEEK_MODEL_PATTERN": "deepseek_model_pattern",
     "OPENAI_MODEL_PATTERN": "openai_model_pattern",
     "CUSTOM_MODEL_PATTERN": "custom_model_pattern",
+    "IMAGE_FALLBACK_MODE": "image_fallback_mode",
+    "IMAGE_FALLBACK_BACKEND": "image_fallback_backend",
+    "IMAGE_FALLBACK_MODEL": "image_fallback_model",
     "MODEL_LIST_MODE": "model_list_mode",
     "MODEL_MENU_STRATEGY": "model_menu_strategy",
     "PROXY_HOST": "proxy_host",
