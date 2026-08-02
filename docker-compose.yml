@@ -28,17 +28,5 @@ services:
       DEEPSEEK_MODEL_PATTERN: "${DEEPSEEK_MODEL_PATTERN:-}"
       OPENAI_MODEL_PATTERN: "${OPENAI_MODEL_PATTERN:-}"
       CUSTOM_MODEL_PATTERN: "${CUSTOM_MODEL_PATTERN:-}"
-      IMAGE_FALLBACK_MODE: "${IMAGE_FALLBACK_MODE:-auto}"
-      IMAGE_FALLBACK_BACKEND: "${IMAGE_FALLBACK_BACKEND:-}"
-      IMAGE_FALLBACK_MODEL: "${IMAGE_FALLBACK_MODEL:-}"
-      NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
-      NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-all}"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     volumes:
       - ./data/claude-science-data:/root/.claude-science

@@ -1,12 +1,10 @@
-FROM ubuntu:24.04
+FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV LANG=zh_CN.UTF-8
 ENV LANGUAGE=zh_CN:zh
 ENV LC_ALL=zh_CN.UTF-8
-ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=all
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -23,23 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
     locales \
     fonts-noto-cjk \
-    gnupg \
-    libglvnd0 \
-    libgl1 \
-    libgl1-mesa-dri \
-    libegl1 \
-    libgles2 \
-    libvulkan1 \
     && locale-gen zh_CN.UTF-8 \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-        | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
-    && curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-        | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-        | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends nvidia-container-toolkit \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt

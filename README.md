@@ -142,28 +142,6 @@ All configuration is done via environment variables in `.env`:
 | `CUSTOM_MODEL_PATTERN` | Regex pattern for custom backend model matching | — |
 | `DEEPSEEK_MODEL_PATTERN` | Regex pattern for DeepSeek model matching | `deepseek\|deep-seek` |
 | `OPENAI_MODEL_PATTERN` | Regex pattern for OpenAI model matching | `^(gpt-\|o1\|o3\|o4\|chatgpt)` |
-| `IMAGE_FALLBACK_MODE` | Image fallback mode: `auto` (fall back to vision model when needed) | `auto` |
-| `IMAGE_FALLBACK_BACKEND` | Backend used for image fallback: `deepseek`, `openai`, `custom` | — |
-| `IMAGE_FALLBACK_MODEL` | Vision model used for image requests (e.g. Kimi K2.6 on SiliconFlow) | — |
-
-## Nvidia GPU Support
-
-The container supports Nvidia GPU passthrough so Claude Science (Electron/Chromium) can use hardware-accelerated rendering on hosts with an Nvidia GPU.
-
-### Host prerequisites
-
-- An Nvidia GPU with a recent driver installed on the host
-- [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed and the `nvidia` runtime registered with Docker (`sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`)
-
-### What the image includes
-
-- NVIDIA Container Toolkit installed inside the container (`nvidia-smi` is available to verify GPU visibility)
-- GLVND / EGL / Vulkan userspace libraries so Chromium can render via the injected driver
-- `NVIDIA_VISIBLE_DEVICES=all` and `NVIDIA_DRIVER_CAPABILITIES=all` set by default (overridable via `.env`)
-
-### Enable / disable
-
-The compose file reserves all GPUs (`driver: nvidia`, `count: all`, capabilities `[gpu]`). To run on a host **without** an Nvidia GPU, remove the `deploy.resources.reservations.devices` block from `docker-compose.yml` — otherwise `docker compose up` will fail to find the `nvidia` device driver.
 
 ## Backend Mode Comparison
 
@@ -265,18 +243,6 @@ DEFAULT_BACKEND=deepseek
 DEEPSEEK_UPSTREAM_MODE=anthropic
 FORCE_MODEL=deepseek-chat
 ```
-
-## Image Fallback (vision model for image requests)
-
-If the selected model is text-only (e.g. DeepSeek) but a request contains an image, the bridge can automatically route that request to a configured vision model (`image_fallback_mode=auto`). Configure the fallback via env vars:
-
-```ini
-IMAGE_FALLBACK_MODE=auto
-IMAGE_FALLBACK_BACKEND=custom
-IMAGE_FALLBACK_MODEL=Pro/moonshotai/Kimi-K2.6
-```
-
-With the example above, text requests still go to DeepSeek while image-bearing requests are handled by Kimi K2.6 (vision) on the SiliconFlow custom backend, avoiding errors from text-only models.
 
 ## Acknowledgements
 
