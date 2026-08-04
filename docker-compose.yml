@@ -3,12 +3,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: claude-science-container
-    container_name: claude-science
+    image: claude-science-container-dev
+    container_name: claude-science-dev
     restart: unless-stopped
     privileged: true
     ports:
-      - "9981:9981"
+      - "9986:9981"
     environment:
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
       DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL:-}"
@@ -31,5 +31,8 @@ services:
       IMAGE_FALLBACK_MODE: "${IMAGE_FALLBACK_MODE:-auto}"
       IMAGE_FALLBACK_BACKEND: "${IMAGE_FALLBACK_BACKEND:-}"
       IMAGE_FALLBACK_MODEL: "${IMAGE_FALLBACK_MODEL:-}"
+      ENABLE_GPU: "${ENABLE_GPU:-auto}"
     volumes:
       - ./data/claude-science-data:/root/.claude-science
+    devices:
+      - nvidia.com/gpu=all

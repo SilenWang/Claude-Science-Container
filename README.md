@@ -64,9 +64,17 @@ I am not a professional software developer, so the reasons for some of the featu
    ```
 
 3. **Build and start**
-   ```bash
-   docker compose up -d
-   ```
+   - **Without Nvidia GPU** (default):
+     ```bash
+     docker compose up -d
+     ```
+   - **With Nvidia GPU** (requires host with Nvidia driver + nvidia-container-toolkit):
+     ```bash
+     docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+     ```
+   Two compose configurations are provided:
+   - `docker-compose.yml` — no GPU access (runs anywhere)
+   - `docker-compose.gpu.yml` — adds GPU device reservation (`driver: nvidia`, `count: all`, capabilities `[gpu]`) and NVIDIA env vars, as an override on top of the base file
 
 4. **Open Claude Science**
    - Check the container logs for the login URL, you will find something like `http://localhost:9981/?nonce=token`, use this to enter webui of Claude Science in browser.

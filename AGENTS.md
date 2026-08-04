@@ -55,6 +55,8 @@ All via `.env` → docker-compose env vars → entrypoint → bridge `config.jso
 ## Notes
 
 - Login URL with nonce token appears in container logs after startup.
+- **GPU via CDI**: the NVIDIA toolkit injects a `tmpfs` mount at `/proc/driver/nvidia/params`. Any sub-mount under `/proc` breaks bwrap's nested-PID-namespace probe (`bwrap: Can't mount proc on /newroot/proc: Operation not permitted`), degrading the sandbox. The entrypoint's `cleanup_proc_mounts()` unmounts `/proc/*` sub-mounts before startup to fix this; `nvidia-smi`/CUDA still work (the driver's own `/proc/driver/nvidia/*` proc-files remain).
+- **GPU inside the sandbox**: claude-science keeps sandbox GPU passthrough off unless `config.toml` sets `gpu_enabled = true` (it then `--dev-bind`s `/dev/nvidia*` + `/sys/module/nvidia{,uvm}` into the code-execution sandbox). The entrypoint's `apply_gpu_config()` writes it when a GPU is present or `ENABLE_GPU=true` (`auto`/`true`/`false` via `.env`). It applies to **new** sessions (existing frames keep their `gpu_mode`). CUDA/torch are NOT installed in the sandbox's default conda `python` env by default.
 - Bridge source lives at `/opt/api-bridge` (cloned from `Jyx0208/claude-science-api-bridge`).
 - claude-science binary downloaded from `downloads.claude.ai/claude-science/latest/linux-x64`.
 - No test suite, no CI, no linter/formatter — this is a deploy-only project.
