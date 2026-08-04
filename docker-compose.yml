@@ -31,6 +31,7 @@ services:
       IMAGE_FALLBACK_MODE: "${IMAGE_FALLBACK_MODE:-auto}"
       IMAGE_FALLBACK_BACKEND: "${IMAGE_FALLBACK_BACKEND:-}"
       IMAGE_FALLBACK_MODEL: "${IMAGE_FALLBACK_MODEL:-}"
+      ENABLE_GPU: "${ENABLE_GPU:-auto}"
     volumes:
       - ./data/claude-science-data:/root/.claude-science
     devices:
