@@ -68,16 +68,89 @@ I am not a professional software developer, so the reasons for some of the featu
      ```bash
      docker compose up -d
      ```
-   - **With Nvidia GPU** (requires host with Nvidia driver + nvidia-container-toolkit):
+   - **With Nvidia GPU** (requires host with Nvidia driver + nvidia-container-toolkit, GPU is mounted into the container via CDI — see [GPU Support (via CDI)](#gpu-support-via-cdi)):
      ```bash
      docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
      ```
    Two compose configurations are provided:
    - `docker-compose.yml` — no GPU access (runs anywhere)
-   - `docker-compose.gpu.yml` — adds GPU device reservation (`driver: nvidia`, `count: all`, capabilities `[gpu]`) and NVIDIA env vars, as an override on top of the base file
+   - `docker-compose.gpu.yml` — CDI override that mounts the host GPU into the container via the CDI device `nvidia.com/gpu=all`, on top of the base file
 
 4. **Open Claude Science**
    - Check the container logs for the login URL, you will find something like `http://localhost:9981/?nonce=token`, use this to enter webui of Claude Science in browser.
+
+
+## GPU Support (via CDI)
+
+The container supports Nvidia GPUs, but the image itself is **not** a CUDA-flavored Docker image (no `nvidia/cuda` base, no CUDA toolkit baked in). The Dockerfile is built on plain `ubuntu:24.04`. Instead, GPU access is provided at runtime by **mounting the host GPU into the container through CDI (Container Device Interface)**. The host's NVIDIA driver, driver libraries, and device nodes are exposed to the container via a CDI device spec, so GPU tools (`nvidia-smi`, CUDA) work inside the container without shipping a CUDA image.
+
+### How the CDI device is declared
+
+The `docker-compose.gpu.yml` override mounts the GPU by declaring the CDI device directly on the service:
+
+```yaml
+services:
+  claude-science:
+    devices:
+      - nvidia.com/gpu=all
+```
+
+`nvidia.com/gpu=all` is a CDI-qualified device name. It is equivalent to passing `--device nvidia.com/gpu=all` (or `--gpus all`) to `docker run`; the GPU device is injected into the container by the CDI runtime rather than preinstalled in the image.
+
+### Prerequisites on the host
+
+1. **NVIDIA driver** installed on the host (kernel driver + `nvidia-smi` working).
+2. **nvidia-container-toolkit** installed and Docker configured to use it:
+   ```bash
+   # Debian/Ubuntu
+   sudo apt-get install -y nvidia-container-toolkit
+   sudo nvidia-ctk runtime configure --runtime=docker
+   sudo systemctl restart docker
+   ```
+
+### Using CDI to mount the GPU
+
+CDI requires a device spec (`nvidia.yaml`) describing the host GPU. The nvidia-container-toolkit provides `nvidia-ctk` to generate it:
+
+1. **Generate the CDI spec** (one time on the host):
+   ```bash
+   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+   ```
+2. **Verify the CDI devices are visible**:
+   ```bash
+   nvidia-ctk cdi list
+   # expected output: nvidia.com/gpu=0, nvidia.com/gpu=1, ..., nvidia.com/gpu=all
+   ```
+
+   If the `nvidia.com/gpu=all` entry is missing, the spec was not generated correctly — regenerate it before starting the container.
+
+3. **Start the container with the GPU override**:
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+   ```
+4. **Sanity-check inside the container**:
+   ```bash
+   docker exec -it claude-science-dev nvidia-smi
+   ```
+
+   For a plain `docker run`, the equivalent invocation is:
+   ```bash
+   docker run --rm -it --device nvidia.com/gpu=all claude-science-container-dev nvidia-smi
+   ```
+
+You can also mount a specific GPU by index instead of all of them (e.g. `nvidia.com/gpu=0`).
+
+### Enabling GPU passthrough into the code-execution sandbox
+
+claude-science keeps GPU passthrough into its sandbox **off** unless `config.toml` sets `gpu_enabled = true`. The entrypoint writes it automatically based on the `ENABLE_GPU` env var in `.env`:
+
+| `ENABLE_GPU` | Behavior |
+|--------------|----------|
+| `auto` (default) | Enable GPU when a GPU device is present in the container (i.e. mounted via CDI) |
+| `true` | Always enable GPU passthrough |
+| `false` | Never enable it |
+
+When enabled, the sandbox gets `/dev/nvidia*` and `/sys/module/nvidia*` dev-bound into it. Note that this only applies to **new** sessions — sessions created before GPU was enabled keep their previous `gpu_mode`. CUDA/torch are not preinstalled in the sandbox's default Python env; install them as needed.
 
 
 ## Startup Assistant (helper)

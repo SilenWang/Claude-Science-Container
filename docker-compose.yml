@@ -34,5 +34,3 @@ services:
       ENABLE_GPU: "${ENABLE_GPU:-auto}"
     volumes:
       - ./data/claude-science-data:/root/.claude-science
-    devices:
-      - nvidia.com/gpu=all
