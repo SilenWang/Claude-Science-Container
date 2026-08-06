@@ -46,6 +46,7 @@ RUN curl -fsSL --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 5 \
 
 COPY scripts/supervisord.conf /etc/supervisor/conf.d/claude-science.conf
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY scripts/configure-cjk-fonts.py /usr/local/bin/configure-cjk-fonts.py
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 9981
