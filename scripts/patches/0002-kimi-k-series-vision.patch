@@ -1,0 +1,12 @@
+--- a/proxy.py
++++ b/proxy.py
+@@ -823,8 +823,7 @@
+         return False
+ 
+     vision_patterns = (
+-        r"kimi[-/ ]?k2[.-]?6",
+-        r"kimi[-/ ]?k2[.-]?5",
++        r"kimi[-/ ]?k\d(?:[.-]\d+)?",
+         r"moonshot[-/ ]?v\d+.*vision",
+         r"qwen\d*(?:[.-]\d+)?[-/ ]?vl",
+         r"qwen[-/ ]?vl",

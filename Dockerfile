@@ -31,6 +31,7 @@ COPY scripts/patches/ /tmp/patches/
 RUN git clone --depth 1 https://github.com/Jyx0208/claude-science-api-bridge.git /opt/api-bridge && \
     rm -rf /opt/api-bridge/.git && \
     patch -p1 -d /opt/api-bridge < /tmp/patches/0001-strip-thinking-block.patch && \
+    patch -p1 -d /opt/api-bridge < /tmp/patches/0002-kimi-k-series-vision.patch && \
     rm -rf /tmp/patches
 
 RUN python3 -m venv /opt/api-bridge/.venv && \
@@ -39,7 +40,7 @@ RUN python3 -m venv /opt/api-bridge/.venv && \
     cp /opt/api-bridge/config.example.json /opt/api-bridge/config.json && \
     chmod 600 /opt/api-bridge/config.json
 
-RUN curl -fsSL --connect-timeout 10 --max-time 60 \
+RUN curl -fsSL --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 5 \
         -o /usr/local/bin/claude-science "https://downloads.claude.ai/claude-science/latest/linux-x64" && \
     chmod +x /usr/local/bin/claude-science
 
