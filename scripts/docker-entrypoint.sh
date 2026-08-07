@@ -118,6 +118,23 @@ if changed:
 PY
 }
 
+configure_plot_fonts() {
+    # matplotlib defaults to DejaVu Sans (no CJK glyphs), so Chinese text in
+    # Python plots renders as boxes even though fonts-noto-cjk is installed.
+    # The claude-science code-execution sandbox forces MPLCONFIGDIR into a
+    # fresh per-workspace cache and gives each spawn a tmpfs $HOME, so the
+    # only matplotlibrc read inside the sandbox is the packaged one in the
+    # conda python env. Patch it idempotently; on a fresh data dir the conda
+    # env is provisioned by claude-science on first boot, so this no-ops
+    # until then and re-applies on every later boot.
+    local py="${CS_HOME}/conda/envs/python/bin/python"
+    if [ ! -x "$py" ]; then
+        echo "WARNING: conda python env not provisioned yet; skipping matplotlib CJK font config"
+        return
+    fi
+    "$py" /usr/local/bin/configure-cjk-fonts.py 2>&1 || true
+}
+
 apply_gpu_config() {
     # claude-science keeps GPU passthrough into its sandbox OFF unless
     # config.toml sets gpu_enabled = true (it then --dev-binds /dev/nvidia*
@@ -179,5 +196,6 @@ cleanup_proc_mounts
 apply_gpu_config
 setup_oauth
 apply_config
+configure_plot_fonts
 
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/claude-science.conf

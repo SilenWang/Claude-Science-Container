@@ -34,6 +34,18 @@ The container successfully runs both claude-science and the API bridge. Key acco
 - **OAuth token auto-setup** — On first run, the entrypoint generates an encryption key and OAuth token for claude-science.
 - **Multiple backend support** — Custom (SiliconFlow, Moonshot, etc.), DeepSeek, and OpenAI backends are all supported.
 
+## Chinese Fonts in Plots
+
+`fonts-noto-cjk` is installed in the image. On every boot, the entrypoint
+idempotently patches the runtime conda env's matplotlib defaults
+(`scripts/configure-cjk-fonts.py`) so Python plots render Chinese with Noto
+Sans/Serif/Mono CJK instead of tofu boxes. The code-execution sandbox gives
+each spawn a fresh per-workspace `MPLCONFIGDIR` and a tmpfs `$HOME`, so the
+only matplotlib config read there is the packaged `matplotlibrc`, which the
+script edits in place. R already resolves `sans` to Noto CJK via fontconfig,
+so R plots are unaffected. The script no-ops until claude-science provisions
+the conda env on first boot and re-applies on every later boot.
+
 ## Known Issues
 
 I am not a professional software developer, so the reasons for some of the features below are based on speculation and are for reference only.
