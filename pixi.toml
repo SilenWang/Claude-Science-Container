@@ -4,6 +4,9 @@ version = "0.1.0"
 channels = ["conda-forge", "bioconda"]
 platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
 
+[tasks.build_image]
+cmd = "docker compose build --build-arg CACHE_BUST=$(date +%s)"
+
 [tasks.clean_linux]
 cmd = "rm -f launcher-linux-{{ arch }}"
 args = [{ arg = "arch", default = "amd64" }]

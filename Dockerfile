@@ -40,7 +40,9 @@ RUN python3 -m venv /opt/api-bridge/.venv && \
     cp /opt/api-bridge/config.example.json /opt/api-bridge/config.json && \
     chmod 600 /opt/api-bridge/config.json
 
-RUN curl -fsSL --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 5 \
+ARG CACHE_BUST
+
+RUN CACHE_BUST=${CACHE_BUST} curl -fsSL --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 5 \
         -o /usr/local/bin/claude-science "https://downloads.claude.ai/claude-science/latest/linux-x64" && \
     chmod +x /usr/local/bin/claude-science
 
