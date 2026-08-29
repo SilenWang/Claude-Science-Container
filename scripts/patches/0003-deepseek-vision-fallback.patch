@@ -1,0 +1,6 @@
+--- a/proxy.py
++++ b/proxy.py
+@@ -886,3 +886,1 @@
+-    if str(backend.get("backend") or "").lower() == "deepseek":
+-        return False
+     return model_supports_vision_input(backend.get("model"))

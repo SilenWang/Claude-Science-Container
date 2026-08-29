@@ -32,6 +32,7 @@ RUN git clone --depth 1 https://github.com/Jyx0208/claude-science-api-bridge.git
     rm -rf /opt/api-bridge/.git && \
     patch -p1 -d /opt/api-bridge < /tmp/patches/0001-strip-thinking-block.patch && \
     patch -p1 -d /opt/api-bridge < /tmp/patches/0002-kimi-k-series-vision.patch && \
+    patch -p1 -d /opt/api-bridge < /tmp/patches/0003-deepseek-vision-fallback.patch && \
     rm -rf /tmp/patches
 
 RUN python3 -m venv /opt/api-bridge/.venv && \
