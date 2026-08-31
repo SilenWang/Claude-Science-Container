@@ -32,7 +32,7 @@ The container successfully runs both claude-science and the API bridge. Key acco
 - **API routing works** — Claude Science routes Anthropic-style API calls through the bridge, which translates them to OpenAI-compatible third-party endpoints. Models are callable via the web UI.
 - **Environment-based configuration** — All API keys and backend options are configurable via environment variables; the entrypoint script (`apply_config`) writes them into the bridge's `config.json` at startup.
 - **OAuth token auto-setup** — On first run, the entrypoint generates an encryption key and OAuth token for claude-science.
-- **Multiple backend support** — Custom (SiliconFlow, Moonshot, etc.), DeepSeek, and OpenAI backends are all supported.
+- **Multiple backend support** — Custom (SiliconFlow, Moonshot, etc.), DeepSeek, and OpenAI backends are all supported. **The default is the DeepSeek official API** with model `deepseek-v4-flash-vision-exp` (displayed as "DeepSeek V4 Flash"), and image requests fall back to the same vision model.
 
 ## Chinese Fonts in Plots
 
@@ -69,11 +69,12 @@ I am not a professional software developer, so the reasons for some of the featu
    ```bash
    cp .env.example .env
    ```
-   Edit `.env` and set at least one API key. The recommended setup is a custom backend:
+   Edit `.env` and set your DeepSeek official API key. The default backend is DeepSeek official API:
    ```ini
-   CUSTOM_API_KEY=sk-your-api-key-here
-   CUSTOM_BASE_URL=https://api.siliconflow.cn
+   DEEPSEEK_API_KEY=sk-your-api-key-here
+   DEFAULT_BACKEND=deepseek
    ```
+   The default model is `deepseek-v4-flash-vision-exp` (shown as **DeepSeek V4 Flash** in the model selector), and image requests automatically fall back to the same DeepSeek vision model.
 
 3. **Build and start**
    - **Without Nvidia GPU** (default):
@@ -221,23 +222,23 @@ All configuration is done via environment variables in `.env`:
 | `CUSTOM_BASE_URL` | API base URL (e.g., SiliconFlow, Moonshot) | — |
 | `DEEPSEEK_API_KEY` | API key for DeepSeek official API | — |
 | `DEEPSEEK_BASE_URL` | DeepSeek API base URL | `https://api.deepseek.com` |
-| `DEEPSEEK_UPSTREAM_MODE` | DeepSeek upstream protocol: `openai` or `anthropic` | `openai` |
+| `DEEPSEEK_UPSTREAM_MODE` | DeepSeek upstream protocol: `openai` or `anthropic` | `anthropic` |
 | `OPENAI_API_KEY` | API key for OpenAI backend | — |
 | `OPENAI_BASE_URL` | OpenAI API base URL | `https://api.openai.com` |
-| `DEFAULT_BACKEND` | Default backend selection: `custom`, `deepseek`, `openai` | `custom` |
-| `FORCE_MODEL` | Force a specific model name | — |
+| `DEFAULT_BACKEND` | Default backend selection: `custom`, `deepseek`, `openai` | `deepseek` |
+| `FORCE_MODEL` | Force a specific model name | `deepseek-v4-flash-vision-exp` |
 | `CUSTOM_UPSTREAM_MODE` | Custom upstream protocol: `openai` or `anthropic` | `openai` |
 | `INLINE_IMAGE_POLICY` | Image handling: `preserve`, `omit`, `omit_inline`, `auto` | `preserve` |
 | `REASONING_CONTENT_POLICY` | Reasoning content handling: `never`, `preserve`, `auto` | `never` |
-| `MODEL_ALIASES` | JSON array of model aliases for multi-model support | — |
+| `MODEL_ALIASES` | JSON array of model aliases for multi-model support | `[{"id":"claude-haiku-4-5","display_name":"DeepSeek V4 Flash","backend":"deepseek","model":"deepseek-v4-flash-vision-exp"}]` |
 | `MODEL_LIST_MODE` | Model list mode: `aliases` (auto-set when MODEL_ALIASES is used) | — |
 | `MODEL_MENU_STRATEGY` | Model menu strategy: `claude_compatible` (auto-set when MODEL_ALIASES is used) | — |
 | `CUSTOM_MODEL_PATTERN` | Regex pattern for custom backend model matching | — |
 | `DEEPSEEK_MODEL_PATTERN` | Regex pattern for DeepSeek model matching | `deepseek\|deep-seek` |
 | `OPENAI_MODEL_PATTERN` | Regex pattern for OpenAI model matching | `^(gpt-\|o1\|o3\|o4\|chatgpt)` |
 | `IMAGE_FALLBACK_MODE` | Image fallback mode: `auto` (fall back to vision model when needed) | `auto` |
-| `IMAGE_FALLBACK_BACKEND` | Backend used for image fallback: `deepseek`, `openai`, `custom` | — |
-| `IMAGE_FALLBACK_MODEL` | Vision model used for image requests (e.g. Kimi K2.6 on SiliconFlow) | — |
+| `IMAGE_FALLBACK_BACKEND` | Backend used for image fallback: `deepseek`, `openai`, `custom` | `deepseek` |
+| `IMAGE_FALLBACK_MODEL` | Vision model used for image requests | `deepseek-v4-flash-vision-exp` |
 
 ## Backend Mode Comparison
 
@@ -260,7 +261,7 @@ When using third-party providers like SiliconFlow or Moonshot, the bridge conver
 
 **Recommended for**: Users who want access to a wide range of models from various providers and don't need web search.
 
-### DeepSeek Anthropic API (`DEFAULT_BACKEND=deepseek`, `DEEPSEEK_UPSTREAM_MODE=anthropic`)
+### DeepSeek Anthropic API (`DEFAULT_BACKEND=deepseek`, `DEEPSEEK_UPSTREAM_MODE=anthropic`) *(default)*
 
 DeepSeek provides an official Anthropic-compatible API endpoint (`/anthropic/v1/messages`). When this mode is enabled, the bridge passes requests through **without format conversion**, preserving all Anthropic protocol features:
 
@@ -275,15 +276,18 @@ DeepSeek provides an official Anthropic-compatible API endpoint (`/anthropic/v1/
 ### How to switch
 
 ```bash
-# Option 1: Custom OpenAI API (wider model selection, no web search)
-CUSTOM_API_KEY=sk-xxx
-CUSTOM_BASE_URL=https://api.siliconflow.cn
-DEFAULT_BACKEND=custom
-
-# Option 2: DeepSeek Anthropic API (web search, tool support)
+# Option 1 (default): DeepSeek official API with vision model (web search, tool support)
 DEEPSEEK_API_KEY=sk-xxx
 DEFAULT_BACKEND=deepseek
 DEEPSEEK_UPSTREAM_MODE=anthropic
+# Default model deepseek-v4-flash-vision-exp is shown as "DeepSeek V4 Flash"
+# (set via MODEL_ALIASES); image requests fall back to it via IMAGE_FALLBACK_*.
+
+# Option 2: Custom OpenAI API (wider model selection, no web search)
+CUSTOM_API_KEY=sk-xxx
+CUSTOM_BASE_URL=https://api.siliconflow.cn
+DEFAULT_BACKEND=custom
+MODEL_ALIASES=
 ```
 
 For more detailed configuration instructions, please refer to the documentation in the [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge).
@@ -315,10 +319,12 @@ Claude Science's model selector will show the `display_name` from each alias, wh
 DEEPSEEK_API_KEY=sk-xxx
 DEFAULT_BACKEND=deepseek
 DEEPSEEK_UPSTREAM_MODE=anthropic
-MODEL_ALIASES='[{"id":"claude-haiku-4-5","display_name":"DeepSeek Flash","backend":"deepseek","model":"deepseek-chat"},{"id":"claude-sonnet-5","display_name":"DeepSeek Pro","backend":"deepseek","model":"deepseek-chat"}]'
+MODEL_ALIASES='[{"id":"claude-haiku-4-5","display_name":"DeepSeek V4 Flash","backend":"deepseek","model":"deepseek-v4-flash-vision-exp"},{"id":"claude-sonnet-5","display_name":"DeepSeek V4 Pro","backend":"deepseek","model":"deepseek-v4-pro"}]'
 ```
 
-With this configuration, the model selector shows **DeepSeek Flash** and **DeepSeek Pro** as two options. When `MODEL_ALIASES` is set, `FORCE_MODEL` is ignored (the alias mappings take precedence).
+With this configuration, the model selector shows **DeepSeek V4 Flash** and **DeepSeek V4 Pro** as two options. When `MODEL_ALIASES` is set, `FORCE_MODEL` is ignored (the alias mappings take precedence).
+
+By default (no `MODEL_ALIASES` override), the container ships with a single alias that shows **DeepSeek V4 Flash** in the selector while sending `deepseek-v4-flash-vision-exp` to the DeepSeek official API.
 
 ### Alias entry fields
 
@@ -337,7 +343,7 @@ If you only need a single model, simply keep using `FORCE_MODEL` as before — n
 DEEPSEEK_API_KEY=sk-xxx
 DEFAULT_BACKEND=deepseek
 DEEPSEEK_UPSTREAM_MODE=anthropic
-FORCE_MODEL=deepseek-chat
+FORCE_MODEL=deepseek-v4-flash-vision-exp
 ```
 
 ## Image Fallback (vision model for image requests)
@@ -346,11 +352,11 @@ If the selected model is text-only (e.g. DeepSeek) but a request contains an ima
 
 ```ini
 IMAGE_FALLBACK_MODE=auto
-IMAGE_FALLBACK_BACKEND=custom
-IMAGE_FALLBACK_MODEL=Pro/moonshotai/Kimi-K2.6
+IMAGE_FALLBACK_BACKEND=deepseek
+IMAGE_FALLBACK_MODEL=deepseek-v4-flash-vision-exp
 ```
 
-With the example above, text requests still go to DeepSeek while image-bearing requests are handled by Kimi K2.6 (vision) on the SiliconFlow custom backend, avoiding errors from text-only models.
+By default the container uses exactly this setup: text requests go to DeepSeek official API, and image-bearing requests are handled by the DeepSeek vision model `deepseek-v4-flash-vision-exp`, avoiding errors from text-only models.
 
 ## Acknowledgements
 
