@@ -10,6 +10,24 @@ import (
 	"time"
 )
 
+// sessionPhase is what a session is doing, as the window shows it.
+type sessionPhase int
+
+const (
+	// phaseIdle is a target nothing has been started for.
+	phaseIdle sessionPhase = iota
+	// phaseConnecting is fetching the login URL or dialing.
+	phaseConnecting
+	// phaseConnected is forwarding with the tunnel up.
+	phaseConnected
+	// phaseError is retrying after a failure; detail says why.
+	phaseError
+)
+
+// reportFn receives every change of a session's state, from the session's
+// goroutine.
+type reportFn func(phase sessionPhase, status, detail string)
+
 // session keeps one target's SSH port forwarding alive, reconnecting when
 // the connection drops, and remembers the login URL it last saw.
 type session struct {
@@ -33,7 +51,7 @@ func newSession(target Target) *session {
 
 // Start runs the session in the background and reports every change of
 // state through report, which is called from the session goroutine.
-func (s *session) Start(report func(status, detail string, failed bool)) {
+func (s *session) Start(report reportFn) {
 	go s.run(report)
 }
 
@@ -78,7 +96,7 @@ func (s *session) sleep(d time.Duration) bool {
 	}
 }
 
-func (s *session) run(report func(status, detail string, failed bool)) {
+func (s *session) run(report reportFn) {
 	defer close(s.doneCh)
 
 	target := &s.target
@@ -87,17 +105,19 @@ func (s *session) run(report func(status, detail string, failed bool)) {
 		command = fmt.Sprintf("docker exec %s %s", target.ContainerID, target.Command)
 	}
 
-	report("正在获取登录地址…", "", false)
+	// The login URL is a convenience: when the command fails the tunnel is
+	// still worth opening, so the failure is reported but the flow goes on.
+	report(phaseConnecting, "正在获取登录地址", "")
 	output, err := runRemoteCommand(target, command)
 	loginURL := parseURL(output)
 	switch {
 	case err != nil:
-		report("无法获取登录地址，将只建立端口转发", err.Error(), true)
+		report(phaseConnecting, "正在建立隧道", err.Error())
 	case loginURL == "":
-		report("未能从命令输出中找到登录地址", strings.TrimSpace(output), true)
+		report(phaseConnecting, "正在建立隧道", "命令输出里没有登录地址："+strings.TrimSpace(output))
 	default:
 		s.setURL(loginURL)
-		report("已获取登录地址，正在打开浏览器…", loginURL, false)
+		report(phaseConnecting, "正在打开浏览器", "")
 		openBrowser(loginURL)
 	}
 
@@ -106,10 +126,9 @@ func (s *session) run(report func(status, detail string, failed bool)) {
 			return
 		}
 
-		report(fmt.Sprintf("正在连接 %s@%s:%d …", target.SSHUser, target.SSHHost, target.SSHPort), s.URL(), false)
 		client, err := dialSSH(target)
 		if err != nil {
-			report("SSH 连接失败，3 秒后重试", err.Error(), true)
+			report(phaseError, "无法连接，3 秒后重试", err.Error())
 			if !s.sleep(3 * time.Second) {
 				return
 			}
@@ -120,18 +139,18 @@ func (s *session) run(report func(status, detail string, failed bool)) {
 		cleanup, err := startForwarding(client, target.PortForwards)
 		if err != nil {
 			client.Close()
-			report("端口转发启动失败，3 秒后重试", err.Error(), true)
+			report(phaseError, "端口转发失败，3 秒后重试", err.Error())
 			if !s.sleep(3 * time.Second) {
 				return
 			}
 			continue
 		}
 
-		status := "已连接，端口已转发"
 		if s.URL() == "" {
-			status += "（未获取到登录地址）"
+			report(phaseConnected, "已连接", "未获取到登录地址，请手动打开转发端口")
+		} else {
+			report(phaseConnected, "已连接", "")
 		}
-		report(status, s.URL(), false)
 		select {
 		case <-s.stopCh:
 			cleanup()
@@ -140,7 +159,7 @@ func (s *session) run(report func(status, detail string, failed bool)) {
 		case <-kaDone:
 			cleanup()
 			client.Close()
-			report("连接断开，3 秒后重连", "", true)
+			report(phaseError, "连接已断开，3 秒后重连", "")
 			if !s.sleep(3 * time.Second) {
 				return
 			}

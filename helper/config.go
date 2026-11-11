@@ -29,9 +29,9 @@ type multiConfig struct {
 
 func defaultTarget() Target {
 	return Target{
-		SSHPort:     22,
-		SSHUser:     "root",
-		Command:     "claude-science url",
+		SSHPort: 22,
+		SSHUser: "root",
+		Command: "claude-science url",
 		PortForwards: []PortForward{
 			{Local: 9876, Remote: 9876},
 			{Local: 9981, Remote: 9981},
@@ -87,13 +87,15 @@ func LoadConfig(path string) ([]Target, error) {
 	}
 
 	var multi multiConfig
-	if err := json.Unmarshal(data, &multi); err == nil && len(multi.Targets) > 0 {
+	if err := json.Unmarshal(data, &multi); err == nil && hasTargetsKey(data) {
 		for i := range multi.Targets {
 			applyDefaults(&multi.Targets[i])
 			if err := validateTarget(&multi.Targets[i], i); err != nil {
 				return nil, err
 			}
 		}
+		// An empty list is a valid config: the window says there is nothing
+		// to connect to yet, rather than reporting a parse error.
 		return multi.Targets, nil
 	}
 
@@ -108,4 +110,15 @@ func LoadConfig(path string) ([]Target, error) {
 	}
 
 	return []Target{legacy}, nil
+}
+
+// hasTargetsKey reports whether the file is in the multi-target form, even
+// when its list is empty: the legacy form has no "targets" field at all.
+func hasTargetsKey(data []byte) bool {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return false
+	}
+	_, ok := probe["targets"]
+	return ok
 }

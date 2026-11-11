@@ -23,7 +23,7 @@ func runCLI(configPath string) {
 
 	log.Printf("Target: %s@%s:%d", target.SSHUser, target.SSHHost, target.SSHPort)
 	s := newSession(*target)
-	s.Start(func(status, detail string, failed bool) {
+	s.Start(func(phase sessionPhase, status, detail string) {
 		if detail == "" {
 			log.Printf("%s", status)
 			return
