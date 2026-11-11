@@ -168,7 +168,7 @@ When enabled, the sandbox gets `/dev/nvidia*` and `/sys/module/nvidia*` dev-boun
 
 ## Startup Assistant (helper)
 
-A Go-based SSH launcher tool that connects to a remote server running the container, sets up port forwarding, automatically retrieves the login URL, and opens the browser.
+A Go-based SSH launcher tool that connects to a remote server running the container, sets up port forwarding, automatically retrieves the login URL, and opens the browser. It has a small GUI (built with [mygo](https://github.com/egoist/mygo)) showing one button per configured target, plus the original terminal mode.
 
 ### Quick Start
 
@@ -182,8 +182,21 @@ cp helper/config.example.json helper/config.json
 # Edit config.json with your SSH server details
 
 # Run
-./helper/launcher
+./helper/launcher          # GUI
+./helper/launcher --cli    # terminal prompt
 ```
+
+`config.json` is looked up next to the executable first, then in the working directory; `--config <path>` points the launcher at another file.
+
+### GUI
+
+The window shows one button per entry in `config.json`. Clicking a button starts that target's SSH port forwarding, fetches its Claude Science login URL, and opens it in the default browser. While a target is connected, clicking its button reopens the login page and `断开` stops the forwarding. `重新加载` re-reads the config, so adding a target only needs an edit and a reload.
+
+If the config is missing or invalid the window shows the error and the path it tried, with buttons to retry or open the config folder.
+
+`launcher --cli` keeps the previous terminal workflow, including the interactive target picker.
+
+On Linux the GUI uses the system's GLib and font libraries, which desktop distributions already ship; on a headless server use `--cli`.
 
 ### Configuration
 

@@ -24,6 +24,7 @@ docker compose build --no-cache  # rebuild from scratch
 - **Routing**: `ANTHROPIC_BASE_URL="http://127.0.0.1:9876"` set in supervisord config, not docker-compose.
 - **`privileged: true`** required in docker-compose for bubblewrap sandbox.
 - Data persisted in named volume `cs-data` at `/root/.claude-science`.
+- **`helper/`** is a Go launcher with a mygo GUI (`gui.go`, one button per config target), a CLI mode (`--cli`), and the SSH forwarding layer (`session.go`), all driven by `helper/config.json`.
 
 ## Container entrypoint (`scripts/docker-entrypoint.sh`)
 
@@ -59,4 +60,4 @@ All via `.env` → docker-compose env vars → entrypoint → bridge `config.jso
 - **GPU inside the sandbox**: claude-science keeps sandbox GPU passthrough off unless `config.toml` sets `gpu_enabled = true` (it then `--dev-bind`s `/dev/nvidia*` + `/sys/module/nvidia{,uvm}` into the code-execution sandbox). The entrypoint's `apply_gpu_config()` writes it when a GPU is present or `ENABLE_GPU=true` (`auto`/`true`/`false` via `.env`). It applies to **new** sessions (existing frames keep their `gpu_mode`). CUDA/torch are NOT installed in the sandbox's default conda `python` env by default.
 - Bridge source lives at `/opt/api-bridge` (cloned from `Jyx0208/claude-science-api-bridge`).
 - claude-science binary downloaded from `downloads.claude.ai/claude-science/latest/linux-x64`.
-- No test suite, no CI, no linter/formatter — this is a deploy-only project.
+- Container: no test suite, no CI, no linter/formatter — this is a deploy-only project. The launcher has headless view tests: `pixi run test`.
