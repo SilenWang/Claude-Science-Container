@@ -168,7 +168,7 @@ When enabled, the sandbox gets `/dev/nvidia*` and `/sys/module/nvidia*` dev-boun
 
 ## Startup Assistant (helper)
 
-A Go-based SSH launcher tool that connects to a remote server running the container, sets up port forwarding, automatically retrieves the login URL, and opens the browser.
+A Go-based SSH launcher tool that connects to a remote server running the container, sets up port forwarding, automatically retrieves the login URL, and opens the browser. It has a small GUI (built with [mygo](https://github.com/egoist/mygo)) listing your servers, plus the original terminal mode.
 
 ### Quick Start
 
@@ -182,8 +182,23 @@ cp helper/config.example.json helper/config.json
 # Edit config.json with your SSH server details
 
 # Run
-./helper/launcher
+./helper/launcher          # GUI
+./helper/launcher --cli    # terminal prompt
 ```
+
+`config.json` is looked up next to the executable first, then in the working directory; `--config <path>` points the launcher at another file.
+
+### GUI
+
+The window lists one card per entry in `config.json`: the server's name, its `user@host`, and the state of its tunnel. Clicking `连接` starts that target's SSH port forwarding, fetches its Claude Science login URL, and opens it in the default browser. A connected card offers `打开` (reopen the login page) and `断开`; a card that is connecting or retrying offers `停止`.
+
+The window deliberately shows no config paths, key paths, ports or commands. `⌘R` / `Ctrl+R` re-reads the config (also in the `⋯` menu, along with `打开配置文件夹` and `退出`), so adding a target only needs an edit and a reload.
+
+When something fails, the card says what happened in one line — `无法连接，3 秒后重试` — and the original error text stays folded under `详细信息` until you ask for it. If the config itself is missing or invalid, the window explains that in a sentence and offers `重试` and `打开配置文件夹`, with the parser's message likewise behind `详细信息`.
+
+`launcher --cli` keeps the previous terminal workflow, including the interactive target picker.
+
+On Linux the GUI uses the system's GLib and font libraries, which desktop distributions already ship; on a headless server use `--cli`.
 
 ### Configuration
 

@@ -6,3 +6,4 @@ helper/launcher*
 helper/config.json
 *.syso
 data
+helper/shots/
