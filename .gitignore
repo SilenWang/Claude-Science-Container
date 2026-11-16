@@ -6,3 +6,5 @@ helper/launcher*
 helper/config.json
 *.syso
 data
+proxy/api-bridge
+proxy/*.test

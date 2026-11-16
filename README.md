@@ -23,16 +23,30 @@ Run [Claude Science](https://claude.ai/science) Linux edition with a third-party
 ```
 
 - **claude-science** — The official Claude Science Linux binary, configured to route API calls through the internal API bridge.
-- **API Bridge** — Translates Anthropic-style API calls from Claude Science to OpenAI-compatible third-party endpoints (DeepSeek, SiliconFlow, Moonshot, etc.). Based on [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
+- **API Bridge** — Translates Anthropic-style API calls from Claude Science to OpenAI-compatible third-party endpoints (DeepSeek, SiliconFlow, Moonshot, etc.). Implemented in Go under `proxy/` (standard library only); its route and translation conventions follow [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
+
+## API Bridge (Go)
+
+The bridge lives in `proxy/` and uses only the Go standard library. The Docker image compiles it in a `golang:1.26` build stage and copies a single static binary into the runtime layer: nothing is cloned from the upstream Python project, no patches are applied, and no venv/pip dependencies exist in the image. Build and test it through pixi:
+
+```bash
+pixi run build_bridge   # builds proxy/api-bridge
+pixi run test_bridge    # go test ./...
+```
+
+Configuration comes entirely from environment variables (`.env`).
+
+`api-bridge setup-token` replaces the upstream `setup-token.py`. It reads `OAUTH_ENCRYPTION_KEY=` from `~/.claude-science/encryption.key`, encrypts a fake OAuth token with Fernet (AES-128-CBC + HMAC-SHA256, standard library only), and writes `~/.claude-science/.oauth-tokens/byok-user-000000000000000000.enc` (directory `0700`, file `0600`). It then reads the file back, decrypts it to verify, and prints `verified: token decrypts`.
 
 ## Current Status
 
 The container successfully runs both claude-science and the API bridge. Key accomplishments:
 
 - **API routing works** — Claude Science routes Anthropic-style API calls through the bridge, which translates them to OpenAI-compatible third-party endpoints. Models are callable via the web UI.
-- **Environment-based configuration** — All API keys and backend options are configurable via environment variables; the entrypoint script (`apply_config`) writes them into the bridge's `config.json` at startup.
-- **OAuth token auto-setup** — On first run, the entrypoint generates an encryption key and OAuth token for claude-science.
-- **Multiple backend support** — Custom (SiliconFlow, Moonshot, etc.), DeepSeek, and OpenAI backends are all supported. **The default is the DeepSeek official API** with model `deepseek-v4-flash-vision-exp` (displayed as "DeepSeek V4 Flash"), and image requests fall back to the same vision model.
+- **Environment-based configuration** — All API keys and backend options are read directly from environment variables by the Go bridge at startup; there is no `config.json` to rewrite.
+- **OAuth token auto-setup** — On first run, the entrypoint lets claude-science create its encryption key if missing, then the Go bridge writes a Fernet-encrypted fake OAuth token. No upstream Python script is involved.
+- **Multiple backend support** — Custom (SiliconFlow, Moonshot, etc.), DeepSeek, and OpenAI backends are all supported. **The default is the DeepSeek official API** with model `deepseek-v4-flash-vision-exp` (displayed as "DeepSeek V4 Flash"); it is a vision model, so image requests go to it directly.
+- **Model menu and image input** — `GET /v1/models` serves the alias/built-in model list, and Anthropic image blocks (base64 or URL) are translated to OpenAI `image_url` parts according to `INLINE_IMAGE_POLICY`.
 
 ## Chinese Fonts in Plots
 
@@ -52,7 +66,8 @@ I am not a professional software developer, so the reasons for some of the featu
 
 - **MCP directory connectors unavailable**: The error that appears upon entering the settings interface does not seem to cause any appreciable effect in practice. According to the literature review, bioinformatics analysis can be carried out normally.
 -  **The `web_search` tool is unavailable**: Compatibility issue: OpenAI-compatible model endpoints do not provide the tool-calling capabilities of Anthropic-compatible endpoints, and therefore cannot use web search. For example, I encounter this issue when using DeepSeek in opencode-go, but when using the Anthropic-compatible endpoint of the official DeepSeek API, web search works normally.
-- **Missing image interpretation config**: The current .env example does not explicitly configure image handling policies, which may cause unexpected behavior during runtime.
+- **Trailing text after a text block is dropped in streaming responses**: Once the bridge has already emitted a text block, any later text delta from the same upstream response is discarded, because Anthropic content blocks are closed in order. If the upstream sends `tool_calls` first and text afterwards, the bridge still opens a text block after the tool block, so that text is kept. Anthropic normally does not emit text after tool calls, so this only affects non-conforming upstreams.
+- **Built-in model IDs fall back to `FORCE_MODEL`**: This is intentional — the model menu must stay clickable — and each `requested -> forced` pair logs one warning. See [Model mapping](#model-mapping-and-v1models).
 - **Tasks terminate unexpectedly**: Tasks running on DeepSeek Flash sometimes terminate unexpectedly mid-execution, whereas DeepSeek Pro experiences this issue far less often.
 
 ## Prerequisites
@@ -222,66 +237,64 @@ All configuration is done via environment variables in `.env`:
 | `CUSTOM_BASE_URL` | API base URL (e.g., SiliconFlow, Moonshot) | — |
 | `DEEPSEEK_API_KEY` | API key for DeepSeek official API | — |
 | `DEEPSEEK_BASE_URL` | DeepSeek API base URL | `https://api.deepseek.com` |
-| `DEEPSEEK_UPSTREAM_MODE` | DeepSeek upstream protocol: `openai` or `anthropic` | `anthropic` |
+| `DEEPSEEK_UPSTREAM_MODE` | DeepSeek upstream protocol: `openai` (default); `anthropic` is accepted but logs a warning and is still treated as `openai` | `openai` |
 | `OPENAI_API_KEY` | API key for OpenAI backend | — |
 | `OPENAI_BASE_URL` | OpenAI API base URL | `https://api.openai.com` |
 | `DEFAULT_BACKEND` | Default backend selection: `custom`, `deepseek`, `openai` | `deepseek` |
-| `FORCE_MODEL` | Force a specific model name | `deepseek-v4-flash-vision-exp` |
+| `FORCE_MODEL` | Model used for requests that are not mapped by `MODEL_ALIASES` (alias mappings win; fallbacks are logged) | `deepseek-v4-flash-vision-exp` |
 | `CUSTOM_UPSTREAM_MODE` | Custom upstream protocol: `openai` or `anthropic` | `openai` |
-| `INLINE_IMAGE_POLICY` | Image handling: `preserve`, `omit`, `omit_inline`, `auto` | `preserve` |
-| `REASONING_CONTENT_POLICY` | Reasoning content handling: `never`, `preserve`, `auto` | `never` |
+| `INLINE_IMAGE_POLICY` | Image handling: `preserve` (keep all), `omit` (drop all), `omit_inline` (drop base64 only), `auto` (omit on DeepSeek, preserve elsewhere) | `preserve` |
+| `REASONING_CONTENT_POLICY` | Accepted but currently has no effect in the Go bridge | `never` |
 | `MODEL_ALIASES` | JSON array of model aliases for multi-model support | `[{"id":"claude-haiku-4-5","display_name":"DeepSeek V4 Flash","backend":"deepseek","model":"deepseek-v4-flash-vision-exp"}]` |
-| `MODEL_LIST_MODE` | Model list mode: `aliases` (auto-set when MODEL_ALIASES is used) | — |
-| `MODEL_MENU_STRATEGY` | Model menu strategy: `claude_compatible` (auto-set when MODEL_ALIASES is used) | — |
+| `MODEL_LIST_MODE` | `/v1/models` layout: `aliases`, `builtin`, `aliases_first`; empty = `aliases` when `MODEL_ALIASES` is set, otherwise `builtin` | — |
+| `MODEL_MENU_STRATEGY` | Accepted but currently has no effect in the Go bridge | — |
 | `CUSTOM_MODEL_PATTERN` | Regex pattern for custom backend model matching | — |
 | `DEEPSEEK_MODEL_PATTERN` | Regex pattern for DeepSeek model matching | `deepseek\|deep-seek` |
 | `OPENAI_MODEL_PATTERN` | Regex pattern for OpenAI model matching | `^(gpt-\|o1\|o3\|o4\|chatgpt)` |
-| `IMAGE_FALLBACK_MODE` | Image fallback mode: `auto` (fall back to vision model when needed) | `auto` |
-| `IMAGE_FALLBACK_BACKEND` | Backend used for image fallback: `deepseek`, `openai`, `custom` | `deepseek` |
-| `IMAGE_FALLBACK_MODEL` | Vision model used for image requests | `deepseek-v4-flash-vision-exp` |
+| `IMAGE_FALLBACK_MODE` | Accepted but currently not implemented by the Go bridge | `auto` |
+| `IMAGE_FALLBACK_BACKEND` | Accepted but currently not implemented by the Go bridge | `deepseek` |
+| `IMAGE_FALLBACK_MODEL` | Accepted but currently not implemented by the Go bridge | `deepseek-v4-flash-vision-exp` |
 
 ## Backend Mode Comparison
 
 The bridge supports two fundamentally different API modes. Choosing the right one depends on your needs:
 
-| Feature | Custom (OpenAI style) | DeepSeek Anthropic style |
-|---------|----------------------|--------------------------|
-| **Configuration** | `CUSTOM_API_KEY` + `CUSTOM_BASE_URL` | `DEEPSEEK_API_KEY` + `DEEPSEEK_UPSTREAM_MODE=anthropic` |
-| **Protocol conversion** | Anthropic → OpenAI (via bridge translation) | Pass-through (direct Anthropic API) |
-| **Tool calls** | ❌ Unsupported — web search, native tool use not available | ✅ Fully supported |
+| Feature | Custom / third-party (OpenAI-compatible) | DeepSeek official API (OpenAI-compatible) |
+|---------|------------------------------------------|------------------------------------------|
+| **Configuration** | `CUSTOM_API_KEY` + `CUSTOM_BASE_URL` | `DEEPSEEK_API_KEY` (+ optional `DEEPSEEK_BASE_URL`) |
+| **Protocol conversion** | Anthropic → OpenAI (via bridge translation) | Anthropic → OpenAI (via bridge translation) |
+| **Tool calls** | ✅ Supported through translation | ✅ Supported through translation |
+| **Web search** | ❌ Not available | ❌ Not available |
 | **Model selection** | More third-party providers (SiliconFlow, Moonshot, etc.) | Limited to DeepSeek official models |
 
 ### Custom OpenAI API (`DEFAULT_BACKEND=custom`)
 
-When using third-party providers like SiliconFlow or Moonshot, the bridge converts Claude Science's Anthropic-format requests to OpenAI-compatible format. During this conversion, Anthropic-specific features — particularly **tool calls** — are lost. This means:
+When using third-party providers like SiliconFlow or Moonshot, the bridge converts Claude Science's Anthropic-format requests to OpenAI-compatible format. Tool calls (`tools` / `tool_use` / `tool_result`) are translated in both directions. Features that have no OpenAI-compatible equivalent are not available:
 
 - The **web search** tool in Claude Science will not function
 - Extended thinking is not available
-- Only basic text generation and code execution work
 
 **Recommended for**: Users who want access to a wide range of models from various providers and don't need web search.
 
-### DeepSeek Anthropic API (`DEFAULT_BACKEND=deepseek`, `DEEPSEEK_UPSTREAM_MODE=anthropic`) *(default)*
+### DeepSeek official API (`DEFAULT_BACKEND=deepseek`, `DEEPSEEK_UPSTREAM_MODE=openai`) *(default)*
 
-DeepSeek provides an official Anthropic-compatible API endpoint (`/anthropic/v1/messages`). When this mode is enabled, the bridge passes requests through **without format conversion**, preserving all Anthropic protocol features:
+The DeepSeek official API is OpenAI-compatible and goes through the same translation path as any other OpenAI-compatible upstream. `DEEPSEEK_UPSTREAM_MODE=anthropic` is accepted for backward compatibility, but the Go bridge logs a warning and still treats the upstream as OpenAI-compatible — there is no Anthropic pass-through.
 
-- The **web search** tool in Claude Science works normally
-- Tool calls and function calling are fully supported
-- All Anthropic message features are preserved
+- The **web search** tool in Claude Science will not function
+- Tool calls (`tools` / `tool_use` / `tool_result`) are supported through translation
+- Anthropic extended thinking is not forwarded
 
-**Recommended for**: Users who need web search, tool use, or want the best compatibility with Claude Science features.
-
-> ⚠️ **Note**: When using `DEEPSEEK_UPSTREAM_MODE=anthropic`, the `thinking` block is automatically stripped from requests since DeepSeek's Anthropic API does not support extended thinking (`thinking.type: "auto"` is not a valid value). This does not affect normal functionality.
+**Recommended for**: Users who want the DeepSeek official API with the default vision model and working tool calls.
 
 ### How to switch
 
 ```bash
-# Option 1 (default): DeepSeek official API with vision model (web search, tool support)
+# Option 1 (default): DeepSeek official API with vision model (tool support, no web search)
 DEEPSEEK_API_KEY=sk-xxx
 DEFAULT_BACKEND=deepseek
-DEEPSEEK_UPSTREAM_MODE=anthropic
+DEEPSEEK_UPSTREAM_MODE=openai
 # Default model deepseek-v4-flash-vision-exp is shown as "DeepSeek V4 Flash"
-# (set via MODEL_ALIASES); image requests fall back to it via IMAGE_FALLBACK_*.
+# (set via MODEL_ALIASES).
 
 # Option 2: Custom OpenAI API (wider model selection, no web search)
 CUSTOM_API_KEY=sk-xxx
@@ -290,7 +303,7 @@ DEFAULT_BACKEND=custom
 MODEL_ALIASES=
 ```
 
-For more detailed configuration instructions, please refer to the documentation in the [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge).
+For the full environment-variable list, see `.env.example` and `proxy/config.go`. The route and translation conventions follow the [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) project.
 
 ## Ports
 
@@ -309,9 +322,9 @@ When using the DeepSeek official API in Anthropic-compatible mode, you can confi
 
 ### How it works
 
-Set `MODEL_ALIASES` as a JSON array where each entry maps a Claude-compatible ID to a real backend model. The entrypoint automatically sets `model_list_mode=aliases` and `model_menu_strategy=claude_compatible` when `MODEL_ALIASES` is provided.
+Set `MODEL_ALIASES` as a JSON array where each entry maps a Claude-compatible ID to a real backend model. The bridge itself builds `GET /v1/models` from `MODEL_ALIASES` and `MODEL_LIST_MODE`; the entrypoint does **not** rewrite any model-list setting.
 
-Claude Science's model selector will show the `display_name` from each alias, while actual requests use the mapped `model` value on the configured `backend`.
+Claude Science's model selector will show the `display_name` from each alias, while actual requests use the mapped `model` value on the configured `backend`. Requests whose model is not an alias fall back to `FORCE_MODEL` (see [Model mapping](#model-mapping-and-v1models)).
 
 ### Configuration example
 
@@ -322,7 +335,7 @@ DEEPSEEK_UPSTREAM_MODE=anthropic
 MODEL_ALIASES='[{"id":"claude-haiku-4-5","display_name":"DeepSeek V4 Flash","backend":"deepseek","model":"deepseek-v4-flash-vision-exp"},{"id":"claude-sonnet-5","display_name":"DeepSeek V4 Pro","backend":"deepseek","model":"deepseek-v4-pro"}]'
 ```
 
-With this configuration, the model selector shows **DeepSeek V4 Flash** and **DeepSeek V4 Pro** as two options. When `MODEL_ALIASES` is set, `FORCE_MODEL` is ignored (the alias mappings take precedence).
+With this configuration, the model selector shows **DeepSeek V4 Flash** and **DeepSeek V4 Pro** as two options. An alias always wins over `FORCE_MODEL`; only requests that match no alias fall back to it.
 
 By default (no `MODEL_ALIASES` override), the container ships with a single alias that shows **DeepSeek V4 Flash** in the selector while sending `deepseek-v4-flash-vision-exp` to the DeepSeek official API.
 
@@ -337,30 +350,66 @@ By default (no `MODEL_ALIASES` override), the container ships with a single alia
 
 ### Without multi-model (single model)
 
-If you only need a single model, simply keep using `FORCE_MODEL` as before — no need to set `MODEL_ALIASES`.
+If you only need a single model, keep `FORCE_MODEL` and leave `MODEL_ALIASES` empty. `/v1/models` then lists the built-in model IDs, and every request is sent to `FORCE_MODEL`.
 
 ```ini
 DEEPSEEK_API_KEY=sk-xxx
 DEFAULT_BACKEND=deepseek
 DEEPSEEK_UPSTREAM_MODE=anthropic
 FORCE_MODEL=deepseek-v4-flash-vision-exp
+MODEL_ALIASES=
 ```
 
-## Image Fallback (vision model for image requests)
+## Model mapping and /v1/models
 
-If the selected model is text-only (e.g. DeepSeek) but a request contains an image, the bridge can automatically route that request to a configured vision model (`image_fallback_mode=auto`). Configure the fallback via env vars:
+For every `POST /v1/messages`, the bridge resolves the requested model in this order:
 
-```ini
-IMAGE_FALLBACK_MODE=auto
-IMAGE_FALLBACK_BACKEND=deepseek
-IMAGE_FALLBACK_MODEL=deepseek-v4-flash-vision-exp
+1. **Alias match** — if the ID equals an entry's `id` in `MODEL_ALIASES`, that alias's `backend` and `model` are used.
+2. **Pattern fallback** — otherwise the backend stays `DEFAULT_BACKEND`, while `DEEPSEEK_MODEL_PATTERN` / `OPENAI_MODEL_PATTERN` / `CUSTOM_MODEL_PATTERN` can still select a different backend.
+3. **Force fallback** — if no mapping produced a model name, `FORCE_MODEL` is used (when set); with `FORCE_MODEL` unset the requested ID passes through unchanged.
+
+Claude Science's model menu contains both alias IDs and built-in IDs such as `gpt-4o`. A click on a model that is not an alias still reaches a working backend: it is sent as `FORCE_MODEL`. This is intentional — rejecting it would make the menu unusable — and the bridge logs one warning per distinct `requested -> forced` pair so the fallback stays observable.
+
+`GET /v1/models` returns:
+
+```json
+{"data":[{"id":"claude-haiku-4-5","display_name":"DeepSeek V4 Flash","type":"model"}],"has_more":false,"first_id":"claude-haiku-4-5","last_id":"claude-haiku-4-5"}
 ```
 
-By default the container uses exactly this setup: text requests go to DeepSeek official API, and image-bearing requests are handled by the DeepSeek vision model `deepseek-v4-flash-vision-exp`, avoiding errors from text-only models.
+`MODEL_LIST_MODE` selects what goes into `data`:
+
+| `MODEL_LIST_MODE` | `data` contents |
+|---|---|
+| `aliases` (also `alias`, `third_party`) | only `MODEL_ALIASES` entries; an empty alias list yields an empty list |
+| `builtin` (also `compat`) | only the built-in model list |
+| `aliases_first` (also `mixed`) | alias entries first, then built-ins, de-duplicated by `id` |
+| unset | `aliases` when `MODEL_ALIASES` is non-empty, otherwise `builtin` |
+
+An empty list is still a valid response: `data: []`, `has_more: false`, and `first_id` / `last_id` are `null`.
+
+## Image Handling
+
+Anthropic `image` blocks become OpenAI `image_url` content parts at their original position in the message (text and images keep the order they have in the Anthropic `content` array):
+
+- `source.type: "base64"` becomes `data:<media_type>;base64,<data>` — the `media_type` field supplies the MIME type and defaults to `image/png`.
+- `source.type: "url"` passes the `url` through unchanged.
+
+`INLINE_IMAGE_POLICY` decides which images are forwarded:
+
+| Value | Behavior |
+|---|---|
+| `preserve` (default) | keep every image |
+| `omit` | drop every image block |
+| `omit_inline` | drop base64 inline images, keep `http(s)` URL images |
+| `auto` | act like `omit` on the DeepSeek backend and `preserve` on the others |
+
+When every image in a user message is dropped, the bridge appends a short placeholder text block instead of sending an empty user message, which OpenAI-compatible upstreams reject with HTTP 400.
+
+`IMAGE_FALLBACK_MODE` / `IMAGE_FALLBACK_BACKEND` / `IMAGE_FALLBACK_MODEL` are still passed through by docker-compose but are **not implemented** in the Go bridge and currently have no effect. The default backend model (`deepseek-v4-flash-vision-exp`) is already a vision model, so images reach it directly without a fallback.
 
 ## Acknowledgements
 
-This project uses [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208) as the API translation layer. All credit for the bridge's backend configuration options and protocol translation logic goes to the original project.
+This project's API bridge (`proxy/`) started from the route and translation conventions of [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208), and is now an independent Go implementation that uses only the standard library.
 
 ## License
 
