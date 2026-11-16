@@ -20,21 +20,32 @@ const (
 	maxErrorSnippet = 500
 )
 
-// server 是 M1 的全部 HTTP 入口。
+// server 是 M1/M2 的全部 HTTP 入口。
 type server struct {
-	cfg     *config
-	client  *http.Client
-	version string
-	logf    func(format string, args ...any)
+	cfg          *config
+	client       *http.Client
+	streamClient *http.Client
+	version      string
+	logf         func(format string, args ...any)
 }
 
 func newServer(cfg *config, version string) *server {
 	return &server{
-		cfg:     cfg,
-		client:  &http.Client{Timeout: 120 * time.Second},
-		version: version,
-		logf:    log.Printf,
+		cfg:          cfg,
+		client:       &http.Client{Timeout: 120 * time.Second},
+		streamClient: newStreamClient(),
+		version:      version,
+		logf:         log.Printf,
 	}
+}
+
+// newStreamClient 用于 SSE：不能设置总超时，否则长回答会被截断；
+// 只在等待上游响应头时设一个上限。
+func newStreamClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 90 * time.Second
+	transport.IdleConnTimeout = 90 * time.Second
+	return &http.Client{Transport: transport}
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -141,14 +152,14 @@ func (s *server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Stream {
-		// M2 才实现 SSE；M1 先按非流式回答，避免客户端拿到无法解析的流。
-		s.logf("[bridge] stream=true requested; M1 answers with a single non-streaming message")
-	}
-
 	requestID := "msg_" + randomHex(8)
 	s.logf("[bridge] -> %s | model=%s | stream=%t | original_model=%s",
 		b.name, backendModel, req.Stream, req.Model)
+
+	if req.Stream {
+		s.handleMessagesStream(w, r, &req, b, openaiBody, requestID, tr)
+		return
+	}
 
 	resp, status, err := s.callUpstream(b, openaiBody)
 	if err != nil {

@@ -16,6 +16,7 @@ func newTestServer(t *testing.T, upstreamURL string) (*server, *config) {
 	srv.logf = t.Logf
 	t.Cleanup(func() {
 		srv.client.CloseIdleConnections()
+		srv.streamClient.CloseIdleConnections()
 	})
 	return srv, cfg
 }
@@ -132,38 +133,6 @@ func TestPathNormalization(t *testing.T) {
 	}
 	if got := normalizePath("/health"); got != "/health" {
 		t.Errorf("normalizePath(/health) = %q", got)
-	}
-}
-
-func TestStreamFlagIsAnsweredNonStreaming(t *testing.T) {
-	var gotBody map[string]any
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		_, _ = io.WriteString(w, fakeOpenAIResponse)
-	}))
-	defer upstream.Close()
-
-	srv, _ := newTestServer(t, upstream.URL)
-	rec := doRequest(t, srv, http.MethodPost, "/v1/messages", `{
-		"model":"claude-sonnet-4-5","max_tokens":8,"stream":true,
-		"messages":[{"role":"user","content":"从一数到五"}]
-	}`)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if _, ok := gotBody["stream"]; ok {
-		t.Fatalf("upstream should not be streamed in M1: %#v", gotBody["stream"])
-	}
-	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
-		t.Fatalf("content-type = %q", ct)
-	}
-	var out map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	if out["type"] != "message" {
-		t.Fatalf("response type = %#v", out["type"])
 	}
 }
 

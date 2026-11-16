@@ -60,7 +60,7 @@ type translation struct {
 var toolNameRe = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
 
 // anthropicToOpenAI 把 Anthropic Messages 请求翻译成 OpenAI Chat Completions 请求。
-// stream 始终为 false：M1 只做非流式，流式由 M2 接管。
+// stream 由 req.Stream 决定：M2 起流式请求会把 stream=true 透传给上游。
 func anthropicToOpenAI(req *anthropicRequest, backendModel string, cfg *config, backendName string) (map[string]any, *translation, error) {
 	messages := make([]map[string]any, 0, len(req.Messages)+1)
 	tr := &translation{toolNames: map[string]string{}}
@@ -83,6 +83,9 @@ func anthropicToOpenAI(req *anthropicRequest, backendModel string, cfg *config, 
 	body := map[string]any{
 		"model":    backendModel,
 		"messages": messages,
+	}
+	if req.Stream {
+		body["stream"] = true
 	}
 
 	maxTokens := req.MaxTokens
