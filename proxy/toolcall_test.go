@@ -603,17 +603,17 @@ func TestToolResultHistoryRoundTrip(t *testing.T) {
 		t.Fatalf("tool_call arguments = %#v", fn["arguments"])
 	}
 
-	// user 消息里混合 text 与 tool_result：先 text，再 tool，且 tool_call_id 对得上。
-	userMsg := msgs[2].(map[string]any)
-	if userMsg["role"] != "user" || userMsg["content"] != "谢谢" {
-		t.Fatalf("user message = %#v", userMsg)
-	}
-	toolMsg := msgs[3].(map[string]any)
+	// user 消息里混合 tool_result 与 text：先 tool，再 user，且 tool_call_id 对得上。
+	toolMsg := msgs[2].(map[string]any)
 	if toolMsg["role"] != "tool" || toolMsg["tool_call_id"] != "call_x" {
 		t.Fatalf("tool message = %#v", toolMsg)
 	}
 	if toolMsg["content"] != "晴，25 度" {
 		t.Fatalf("tool content = %#v", toolMsg["content"])
+	}
+	userMsg := msgs[3].(map[string]any)
+	if userMsg["role"] != "user" || userMsg["content"] != "谢谢" {
+		t.Fatalf("user message = %#v", userMsg)
 	}
 
 	var reply map[string]any
@@ -650,5 +650,149 @@ func TestToolResultWithoutTextStaysToolOnly(t *testing.T) {
 	}
 	if tr.toolNames["run_code"] != "run code" {
 		t.Fatalf("tool name mapping = %#v", tr.toolNames)
+	}
+}
+
+// 上游把 name/id 拆成非前缀片段（"get_wea" + "ther"）：必须按 append 拼完整，
+// 不能截断成半截名字。
+func TestStreamToolCallSplitNameAppended(t *testing.T) {
+	frames := []string{
+		sseData(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_","function":{"name":"get_wea","arguments":""}}]}}]}`),
+		sseData(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"1","function":{"name":"ther","arguments":"{\"city\":\"北京\"}"}}]}}]}`),
+		sseData(`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`),
+		"data: [DONE]\n\n",
+	}
+
+	upstream := httptest.NewServer(streamFromFrames(t, frames, -1))
+	defer upstream.Close()
+
+	srv, _ := newTestServer(t, upstream.URL)
+	rec := doRequest(t, srv, http.MethodPost, "/v1/messages", toolRequestPrefix+`,"stream":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	all := parseSSE(t, rec.Body.String())
+	var block map[string]any
+	var partial strings.Builder
+	for _, f := range all {
+		switch f.name {
+		case "content_block_start":
+			block = f.payload["content_block"].(map[string]any)
+		case "content_block_delta":
+			delta := f.payload["delta"].(map[string]any)
+			partial.WriteString(delta["partial_json"].(string))
+		}
+	}
+	if block == nil {
+		t.Fatalf("no content_block_start: %v", frameNames(all))
+	}
+	if block["id"] != "call_1" || block["name"] != "get weather" {
+		t.Fatalf("content_block = %#v", block)
+	}
+	if partial.String() != `{"city":"北京"}` {
+		t.Fatalf("partial_json = %q", partial.String())
+	}
+}
+
+// 上游 tool_calls[].index 乱序，且低 index 的块一直没凑齐 name/id：finish 阶段
+// 必须补开该块（取下一个 block index），参数不能静默丢失。
+func TestStreamOutOfOrderToolCallStartedAtFinish(t *testing.T) {
+	frames := []string{
+		// index 1 先到且完整，立即打开 block 0。
+		sseData(`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_b","function":{"name":"get_time","arguments":"{\"tz\":\"UTC\"}"}}]}}]}`),
+		// index 0 后到，只有参数，没有 name/id：无法立即开块。
+		sseData(`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":\"北京\"}"}}]}}]}`),
+		sseData(`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`),
+		"data: [DONE]\n\n",
+	}
+
+	upstream := httptest.NewServer(streamFromFrames(t, frames, -1))
+	defer upstream.Close()
+
+	srv, _ := newTestServer(t, upstream.URL)
+	rec := doRequest(t, srv, http.MethodPost, "/v1/messages", toolRequestPrefix+`,"stream":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	all := parseSSE(t, rec.Body.String())
+	var starts []map[string]any
+	partials := map[int]string{}
+	stops := map[int]bool{}
+	for _, f := range all {
+		switch f.name {
+		case "content_block_start":
+			block := f.payload["content_block"].(map[string]any)
+			if block["type"] != "tool_use" {
+				t.Fatalf("block is not tool_use: %#v", block)
+			}
+			starts = append(starts, map[string]any{
+				"index": int(f.payload["index"].(float64)),
+				"block": block,
+			})
+		case "content_block_delta":
+			index := int(f.payload["index"].(float64))
+			delta := f.payload["delta"].(map[string]any)
+			partials[index] += delta["partial_json"].(string)
+		case "content_block_stop":
+			stops[int(f.payload["index"].(float64))] = true
+		}
+	}
+	if len(starts) != 2 {
+		t.Fatalf("tool blocks = %#v (frames = %v)", starts, frameNames(all))
+	}
+	// 已打开的块按事件顺序拿 index 0、1；后补开的块不能复用 index。
+	if starts[0]["index"] != 0 || starts[1]["index"] != 1 {
+		t.Fatalf("block indices = %#v", starts)
+	}
+	first := starts[0]["block"].(map[string]any)
+	if first["id"] != "call_b" || first["name"] != "get time" {
+		t.Fatalf("first block = %#v", first)
+	}
+	second := starts[1]["block"].(map[string]any)
+	if second["type"] != "tool_use" {
+		t.Fatalf("second block = %#v", second)
+	}
+	if !strings.Contains(partials[1], "北京") {
+		t.Fatalf("out-of-order arguments lost: partials = %#v", partials)
+	}
+	if !stops[0] || !stops[1] {
+		t.Fatalf("blocks not stopped: %#v", stops)
+	}
+}
+
+// tool_calls 之后的尾随文本继续丢弃（已知问题，行为固定在这里）。
+func TestStreamTextAfterToolCallIsDropped(t *testing.T) {
+	frames := []string{
+		sseData(`{"choices":[{"delta":{"content":"先查一下"}}]}`),
+		sseData(`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"get_weather","arguments":"{\"city\":\"北京\"}"}}]}}]}`),
+		sseData(`{"choices":[{"delta":{"content":"这后面的话不该出现"}}]}`),
+		sseData(`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`),
+		"data: [DONE]\n\n",
+	}
+
+	upstream := httptest.NewServer(streamFromFrames(t, frames, -1))
+	defer upstream.Close()
+
+	srv, _ := newTestServer(t, upstream.URL)
+	rec := doRequest(t, srv, http.MethodPost, "/v1/messages", toolRequestPrefix+`,"stream":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	all := parseSSE(t, rec.Body.String())
+	var text strings.Builder
+	for _, f := range all {
+		if f.name != "content_block_delta" {
+			continue
+		}
+		delta := f.payload["delta"].(map[string]any)
+		if delta["type"] == "text_delta" {
+			text.WriteString(delta["text"].(string))
+		}
+	}
+	if got := text.String(); got != "先查一下" {
+		t.Fatalf("streamed text = %q, trailing text must be dropped", got)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -27,6 +28,11 @@ type server struct {
 	streamClient *http.Client
 	version      string
 	logf         func(format string, args ...any)
+
+	// warnMu/warnedModels 让 FORCE_MODEL 回落告警对同一 requested -> forced
+	// 组合只打一次，避免每个请求刷屏。
+	warnMu       sync.Mutex
+	warnedModels map[string]bool
 }
 
 func newServer(cfg *config, version string) *server {
@@ -36,6 +42,7 @@ func newServer(cfg *config, version string) *server {
 		streamClient: newStreamClient(),
 		version:      version,
 		logf:         log.Printf,
+		warnedModels: map[string]bool{},
 	}
 }
 
@@ -93,6 +100,14 @@ func normalizePath(path string) string {
 	if path != "/v1" && !strings.HasPrefix(path, "/v1/") {
 		path = "/v1" + path
 	}
+	// 尾斜杠归一化：/v1/models/ 与 /v1/models 落同一条注册路由，
+	// /v1/messages/ 也不会再被兜底句柄吞掉。
+	if len(path) > 1 {
+		path = strings.TrimRight(path, "/")
+	}
+	if path == "" {
+		path = "/"
+	}
 	return path
 }
 
@@ -145,6 +160,7 @@ func (s *server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	s.warnForcedModel(req.Model, backendModel)
 
 	openaiBody, tr, err := anthropicToOpenAI(&req, backendModel, s.cfg, b.name)
 	if err != nil {
@@ -244,13 +260,36 @@ func (s *server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"input_tokens": tokens})
 }
 
+// warnForcedModel 在请求模型没有 alias 映射、最终被 FORCE_MODEL 顶替时打一条
+// 警告。内置模型（如 gpt-4o）同样会走这条回落，因此也在这里留下痕迹，不静默。
+// 同一 requested -> forced 组合只打一次。
+func (s *server) warnForcedModel(requested, backendModel string) {
+	forced := strings.TrimSpace(s.cfg.ForceModel)
+	if forced == "" || backendModel != forced || requested == forced {
+		return
+	}
+	if s.cfg.aliasFor(requested) != nil {
+		return
+	}
+	key := requested + " -> " + forced
+	s.warnMu.Lock()
+	if s.warnedModels[key] {
+		s.warnMu.Unlock()
+		return
+	}
+	s.warnedModels[key] = true
+	s.warnMu.Unlock()
+	s.logf("[bridge] WARNING: requested model %q has no MODEL_ALIASES mapping and was replaced by FORCE_MODEL %q", requested, forced)
+}
+
 func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		methodNotAllowed(w, r)
 		return
 	}
 	models := s.cfg.modelList()
-	firstID, lastID := "", ""
+	// 空清单时 first_id/last_id 必须是 null（不是 ""），与 Anthropic 的列表语义一致。
+	var firstID, lastID any
 	if len(models) > 0 {
 		firstID = fmt.Sprint(models[0]["id"])
 		lastID = fmt.Sprint(models[len(models)-1]["id"])

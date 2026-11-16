@@ -124,18 +124,19 @@ func (c *config) modelList() []map[string]any {
 
 	switch strings.ToLower(strings.TrimSpace(c.ModelListMode)) {
 	case "aliases", "alias", "third_party", "third-party":
+		// 只显示 alias 项；alias 清单为空时就是空清单，不回退到 builtin。
 		addAliases()
-		if len(out) == 0 {
-			addBuiltin()
-		}
 	case "builtin", "builtins", "compat":
 		addBuiltin()
-	case "aliases_first", "aliases-first", "mixed", "":
+	case "aliases_first", "aliases-first", "mixed":
 		addAliases()
 		addBuiltin()
 	default:
-		addAliases()
-		if len(out) == 0 {
+		// 默认规则：配了 MODEL_ALIASES 就是 aliases（只有 alias 项），
+		// 否则只有内置清单。不会回退到 aliases_first 把两者混在一起。
+		if len(c.ModelAliases) > 0 {
+			addAliases()
+		} else {
 			addBuiltin()
 		}
 	}

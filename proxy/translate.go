@@ -213,6 +213,10 @@ func decodeBlocks(raw json.RawMessage) (text string, blocks []anthropicBlock, is
 	return "", blocks, false
 }
 
+// translateUserMessage 把一条 Anthropic user 消息翻译成 OpenAI 消息序列。
+// 顺序固定为「先 tool 后 user」：OpenAI / DeepSeek / vLLM 都要求 role:"tool"
+// 紧随带 tool_calls 的 assistant；同一 Anthropic 消息里的正文另起一条 user。
+// text 与 image 块保持它们在 Anthropic content 数组里的原顺序。
 func translateUserMessage(msg anthropicMessage, imagePolicy string) []map[string]any {
 	text, blocks, isText := decodeBlocks(msg.Content)
 	if isText {
@@ -223,8 +227,7 @@ func translateUserMessage(msg anthropicMessage, imagePolicy string) []map[string
 	}
 
 	var toolMessages []map[string]any
-	var textParts []string
-	var imageParts []map[string]any
+	parts := make([]map[string]any, 0, len(blocks))
 	omitted := 0
 
 	for _, block := range blocks {
@@ -237,52 +240,64 @@ func translateUserMessage(msg anthropicMessage, imagePolicy string) []map[string
 			})
 		case "text":
 			if block.Text != "" {
-				textParts = append(textParts, block.Text)
+				parts = append(parts, map[string]any{"type": "text", "text": block.Text})
 			}
 		case "image", "image_url":
 			url := openAIImageURL(block)
-			if url == "" || imagePolicy == "omit" || (imagePolicy == "omit_inline" && strings.HasPrefix(url, "data:")) {
+			if url == "" || imageOmitted(url, imagePolicy) {
 				omitted++
 				continue
 			}
-			imageParts = append(imageParts, map[string]any{
+			parts = append(parts, map[string]any{
 				"type":      "image_url",
 				"image_url": map[string]any{"url": url},
 			})
 		}
 	}
 
-	joined := strings.Join(textParts, " ")
-	var content any
-	switch {
-	case len(imageParts) > 0:
-		parts := make([]map[string]any, 0, len(imageParts)+2)
-		if joined != "" {
-			parts = append(parts, map[string]any{"type": "text", "text": joined})
-		}
-		parts = append(parts, imageParts...)
-		if omitted > 0 {
-			parts = append(parts, map[string]any{
-				"type": "text",
-				"text": fmt.Sprintf("[%d inline image attachment(s) omitted for backend compatibility.]", omitted),
-			})
-		}
-		content = parts
-	case omitted > 0:
-		note := fmt.Sprintf("[%d inline image attachment(s) omitted for backend compatibility.]", omitted)
-		content = strings.TrimSpace(strings.Join([]string{joined, note}, " "))
-	default:
-		content = joined
+	// 图片全被剔除后不能把空的 user 消息发给上游（OpenAI 会 400）：
+	// 补一条占位文本。只丢了一部分时同样追加，提示模型这里有图但未转发。
+	if omitted > 0 {
+		parts = append(parts, map[string]any{
+			"type": "text",
+			"text": fmt.Sprintf("[%d image attachment(s) omitted by INLINE_IMAGE_POLICY=%s.]", omitted, imagePolicy),
+		})
 	}
 
-	// 顺序固定为「先 text 再 tool」：同一个 user 消息里混合正文与 tool_result 时，
-	// 正文作为 user 消息在前，tool 消息按块内出现顺序跟在后面。
 	out := make([]map[string]any, 0, len(toolMessages)+1)
-	if content != "" {
+	out = append(out, toolMessages...)
+	if content := openAIContentParts(parts); content != nil {
 		out = append(out, map[string]any{"role": "user", "content": content})
 	}
-	out = append(out, toolMessages...)
 	return out
+}
+
+// openAIContentParts 在只有一个 text 块时沿用字符串 content（M1/M2 的既有形态），
+// 其余情况（多段或含图片）用 OpenAI 的 part 数组。
+func openAIContentParts(parts []map[string]any) any {
+	switch len(parts) {
+	case 0:
+		return nil
+	case 1:
+		if parts[0]["type"] == "text" {
+			return parts[0]["text"]
+		}
+	}
+	return parts
+}
+
+// imageOmitted 实现 INLINE_IMAGE_POLICY 的三档语义：
+//   - preserve：全部保留（默认）
+//   - omit：丢弃所有图片块（base64 内联图与 http(s) URL 图都丢）
+//   - omit_inline：只丢 base64 data: 内联图，保留 http(s) URL 图
+func imageOmitted(url, policy string) bool {
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "omit":
+		return true
+	case "omit_inline":
+		return strings.HasPrefix(url, "data:")
+	}
+	return false
 }
 
 func translateAssistantMessage(msg anthropicMessage, tr *translation) map[string]any {
@@ -380,20 +395,37 @@ func openAIImageURL(block anthropicBlock) string {
 			return obj.URL
 		}
 	}
-	if block.Source == nil {
+	source := block.Source
+	if source == nil {
 		return ""
 	}
-	if block.Source.URL != "" {
-		return block.Source.URL
+	switch strings.ToLower(strings.TrimSpace(source.Type)) {
+	case "url":
+		// source.type == "url"：直接透传 url，不做 base64 转换。
+		return strings.TrimSpace(source.URL)
+	case "base64":
+		if source.Data == "" {
+			return ""
+		}
+		return imageDataURL(source.MediaType, source.Data)
 	}
-	if block.Source.Data == "" {
+	// 未标注 source.type 的容错：有 url 就透传，否则按 base64 处理。
+	if source.URL != "" {
+		return strings.TrimSpace(source.URL)
+	}
+	if source.Data == "" {
 		return ""
 	}
-	mediaType := block.Source.MediaType
+	return imageDataURL(source.MediaType, source.Data)
+}
+
+// imageDataURL 用来源的 media_type 拼 data: 前缀，不再一律 image/png。
+func imageDataURL(mediaType, data string) string {
+	mediaType = strings.TrimSpace(mediaType)
 	if mediaType == "" {
 		mediaType = "image/png"
 	}
-	return "data:" + mediaType + ";base64," + block.Source.Data
+	return "data:" + mediaType + ";base64," + data
 }
 
 func imagePolicyFor(backendName, configured string) string {

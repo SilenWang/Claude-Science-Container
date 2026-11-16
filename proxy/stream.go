@@ -114,10 +114,9 @@ type streamState struct {
 	textStarted bool
 	textStopped bool
 
-	// tools 按上游 tool_calls[].index 升序排列；nextOpenPos 指向第一个还没打开的块，
-	// 保证 Anthropic 的 block index 严格按上游顺序分配（文本块占 0，工具从 1 起）。
-	tools       []*toolCallState
-	nextOpenPos int
+	// tools 按上游 tool_calls[].index 升序遍历；每次打开取下一个可用的
+	// Anthropic block index，因此乱序到达的块也能补开，不会与已打开的块撞 index。
+	tools []*toolCallState
 
 	finishReason string
 	outputTokens int
@@ -237,10 +236,6 @@ func (st *streamState) toolState(upstreamIndex int) *toolCallState {
 	st.tools = append(st.tools, nil)
 	copy(st.tools[pos+1:], st.tools[pos:])
 	st.tools[pos] = call
-	// 插到了已经处理过的位置之前：游标跟着右移，避免重复打开同一个块。
-	if pos < st.nextOpenPos {
-		st.nextOpenPos++
-	}
 	return call
 }
 
@@ -253,6 +248,7 @@ func (st *streamState) addToolCall(index int, id, name, arguments string) {
 }
 
 // mergeDeltaField 容忍上游把 id/name 拆成多帧增量下发，也容忍每帧重复下发完整值。
+// 非前缀片段按 append 拼接：上游把 name 拆成 "get_wea" + "ther" 时不能截断成半截。
 func mergeDeltaField(current, incoming string) string {
 	if incoming == "" || incoming == current {
 		return current
@@ -261,12 +257,14 @@ func mergeDeltaField(current, incoming string) string {
 		return incoming
 	}
 	if strings.HasPrefix(incoming, current) {
+		// 累计值重复下发。
 		return incoming
 	}
 	if strings.HasPrefix(current, incoming) {
+		// 旧片段的重复下发。
 		return current
 	}
-	return incoming
+	return current + incoming
 }
 
 // startToolBlock 打开一个 tool_use 块：id 原样透传上游 tool_call.id，name 回填 Anthropic 原名。
@@ -296,24 +294,23 @@ func (st *streamState) startToolBlock(out *sseWriter, call *toolCallState) error
 	})
 }
 
-// pumpTools 按上游顺序打开工具块并下发已缓冲的 arguments 片段。
+// pumpTools 打开尚未打开的 tool 块并按需下发已缓冲的 arguments。
 // force=false 时只打开「name/id 已到齐且已有参数」的块，保证上手就能真增量；
-// 并行调用里靠后的工具会等前面的块先打开（block index 必须升序）。
+// force=true（finish 阶段）补齐所有还没打开的块，避免上游 index 乱序时丢工具调用。
 func (st *streamState) pumpTools(out *sseWriter, force bool) error {
-	for st.nextOpenPos < len(st.tools) {
-		call := st.tools[st.nextOpenPos]
+	// 按上游 tool_calls[].index 升序遍历未打开的块；块 index 取下一个可用值，
+	// 因此晚到的低 index 块也能补开，不会和已打开的块撞 index。
+	for _, call := range st.tools {
 		if call.started {
-			st.nextOpenPos++
 			continue
 		}
 		ready := force || (call.name != "" && call.id != "" && call.pending.Len() > 0)
 		if !ready {
-			break
+			continue
 		}
 		if err := st.startToolBlock(out, call); err != nil {
 			return err
 		}
-		st.nextOpenPos++
 	}
 
 	// 已打开的块：新到的片段立刻作为 input_json_delta 原样下发。

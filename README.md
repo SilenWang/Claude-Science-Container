@@ -43,7 +43,8 @@ The container successfully runs both claude-science and the API bridge. Key acco
 - **API routing works** — Claude Science routes Anthropic-style API calls through the bridge, which translates them to OpenAI-compatible third-party endpoints. Models are callable via the web UI.
 - **Environment-based configuration** — All API keys and backend options are read directly from environment variables by the Go bridge at startup; there is no `config.json` to rewrite.
 - **OAuth token auto-setup** — On first run, the entrypoint generates an encryption key and OAuth token for claude-science.
-- **Multiple backend support** — Custom (SiliconFlow, Moonshot, etc.), DeepSeek, and OpenAI backends are all supported. **The default is the DeepSeek official API** with model `deepseek-v4-flash-vision-exp` (displayed as "DeepSeek V4 Flash"), and image requests fall back to the same vision model.
+- **Multiple backend support** — Custom (SiliconFlow, Moonshot, etc.), DeepSeek, and OpenAI backends are all supported. **The default is the DeepSeek official API** with model `deepseek-v4-flash-vision-exp` (displayed as "DeepSeek V4 Flash"); it is a vision model, so image requests go to it directly.
+- **Model menu and image input** — `GET /v1/models` serves the alias/built-in model list, and Anthropic image blocks (base64 or URL) are translated to OpenAI `image_url` parts according to `INLINE_IMAGE_POLICY`.
 
 ## Chinese Fonts in Plots
 
@@ -63,7 +64,8 @@ I am not a professional software developer, so the reasons for some of the featu
 
 - **MCP directory connectors unavailable**: The error that appears upon entering the settings interface does not seem to cause any appreciable effect in practice. According to the literature review, bioinformatics analysis can be carried out normally.
 -  **The `web_search` tool is unavailable**: Compatibility issue: OpenAI-compatible model endpoints do not provide the tool-calling capabilities of Anthropic-compatible endpoints, and therefore cannot use web search. For example, I encounter this issue when using DeepSeek in opencode-go, but when using the Anthropic-compatible endpoint of the official DeepSeek API, web search works normally.
-- **Missing image interpretation config**: The current .env example does not explicitly configure image handling policies, which may cause unexpected behavior during runtime.
+- **Text after `tool_calls` is dropped in streaming responses**: Once the bridge has opened a `tool_use` block, any later text delta from the same upstream response is discarded, because Anthropic content blocks are already closed in order. Anthropic normally does not emit text after tool calls, so this only affects non-conforming upstreams.
+- **Built-in model IDs fall back to `FORCE_MODEL`**: This is intentional — the model menu must stay clickable — and each `requested -> forced` pair logs one warning. See [Model mapping](#model-mapping-and-v1models).
 - **Tasks terminate unexpectedly**: Tasks running on DeepSeek Flash sometimes terminate unexpectedly mid-execution, whereas DeepSeek Pro experiences this issue far less often.
 
 ## Prerequisites
@@ -237,19 +239,19 @@ All configuration is done via environment variables in `.env`:
 | `OPENAI_API_KEY` | API key for OpenAI backend | — |
 | `OPENAI_BASE_URL` | OpenAI API base URL | `https://api.openai.com` |
 | `DEFAULT_BACKEND` | Default backend selection: `custom`, `deepseek`, `openai` | `deepseek` |
-| `FORCE_MODEL` | Force a specific model name | `deepseek-v4-flash-vision-exp` |
+| `FORCE_MODEL` | Model used for requests that are not mapped by `MODEL_ALIASES` (alias mappings win; fallbacks are logged) | `deepseek-v4-flash-vision-exp` |
 | `CUSTOM_UPSTREAM_MODE` | Custom upstream protocol: `openai` or `anthropic` | `openai` |
-| `INLINE_IMAGE_POLICY` | Image handling: `preserve`, `omit`, `omit_inline`, `auto` | `preserve` |
-| `REASONING_CONTENT_POLICY` | Reasoning content handling: `never`, `preserve`, `auto` | `never` |
+| `INLINE_IMAGE_POLICY` | Image handling: `preserve` (keep all), `omit` (drop all), `omit_inline` (drop base64 only), `auto` (omit on DeepSeek, preserve elsewhere) | `preserve` |
+| `REASONING_CONTENT_POLICY` | Accepted but currently has no effect in the Go bridge | `never` |
 | `MODEL_ALIASES` | JSON array of model aliases for multi-model support | `[{"id":"claude-haiku-4-5","display_name":"DeepSeek V4 Flash","backend":"deepseek","model":"deepseek-v4-flash-vision-exp"}]` |
-| `MODEL_LIST_MODE` | Model list mode: `aliases` (auto-set when MODEL_ALIASES is used) | — |
-| `MODEL_MENU_STRATEGY` | Model menu strategy: `claude_compatible` (auto-set when MODEL_ALIASES is used) | — |
+| `MODEL_LIST_MODE` | `/v1/models` layout: `aliases`, `builtin`, `aliases_first`; empty = `aliases` when `MODEL_ALIASES` is set, otherwise `builtin` | — |
+| `MODEL_MENU_STRATEGY` | Accepted but currently has no effect in the Go bridge | — |
 | `CUSTOM_MODEL_PATTERN` | Regex pattern for custom backend model matching | — |
 | `DEEPSEEK_MODEL_PATTERN` | Regex pattern for DeepSeek model matching | `deepseek\|deep-seek` |
 | `OPENAI_MODEL_PATTERN` | Regex pattern for OpenAI model matching | `^(gpt-\|o1\|o3\|o4\|chatgpt)` |
-| `IMAGE_FALLBACK_MODE` | Image fallback mode: `auto` (fall back to vision model when needed) | `auto` |
-| `IMAGE_FALLBACK_BACKEND` | Backend used for image fallback: `deepseek`, `openai`, `custom` | `deepseek` |
-| `IMAGE_FALLBACK_MODEL` | Vision model used for image requests | `deepseek-v4-flash-vision-exp` |
+| `IMAGE_FALLBACK_MODE` | Accepted but currently not implemented by the Go bridge | `auto` |
+| `IMAGE_FALLBACK_BACKEND` | Accepted but currently not implemented by the Go bridge | `deepseek` |
+| `IMAGE_FALLBACK_MODEL` | Accepted but currently not implemented by the Go bridge | `deepseek-v4-flash-vision-exp` |
 
 ## Backend Mode Comparison
 
@@ -320,9 +322,9 @@ When using the DeepSeek official API in Anthropic-compatible mode, you can confi
 
 ### How it works
 
-Set `MODEL_ALIASES` as a JSON array where each entry maps a Claude-compatible ID to a real backend model. The entrypoint automatically sets `model_list_mode=aliases` and `model_menu_strategy=claude_compatible` when `MODEL_ALIASES` is provided.
+Set `MODEL_ALIASES` as a JSON array where each entry maps a Claude-compatible ID to a real backend model. The bridge itself builds `GET /v1/models` from `MODEL_ALIASES` and `MODEL_LIST_MODE`; the entrypoint does **not** rewrite any model-list setting.
 
-Claude Science's model selector will show the `display_name` from each alias, while actual requests use the mapped `model` value on the configured `backend`.
+Claude Science's model selector will show the `display_name` from each alias, while actual requests use the mapped `model` value on the configured `backend`. Requests whose model is not an alias fall back to `FORCE_MODEL` (see [Model mapping](#model-mapping-and-v1models)).
 
 ### Configuration example
 
@@ -333,7 +335,7 @@ DEEPSEEK_UPSTREAM_MODE=anthropic
 MODEL_ALIASES='[{"id":"claude-haiku-4-5","display_name":"DeepSeek V4 Flash","backend":"deepseek","model":"deepseek-v4-flash-vision-exp"},{"id":"claude-sonnet-5","display_name":"DeepSeek V4 Pro","backend":"deepseek","model":"deepseek-v4-pro"}]'
 ```
 
-With this configuration, the model selector shows **DeepSeek V4 Flash** and **DeepSeek V4 Pro** as two options. When `MODEL_ALIASES` is set, `FORCE_MODEL` is ignored (the alias mappings take precedence).
+With this configuration, the model selector shows **DeepSeek V4 Flash** and **DeepSeek V4 Pro** as two options. An alias always wins over `FORCE_MODEL`; only requests that match no alias fall back to it.
 
 By default (no `MODEL_ALIASES` override), the container ships with a single alias that shows **DeepSeek V4 Flash** in the selector while sending `deepseek-v4-flash-vision-exp` to the DeepSeek official API.
 
@@ -348,26 +350,62 @@ By default (no `MODEL_ALIASES` override), the container ships with a single alia
 
 ### Without multi-model (single model)
 
-If you only need a single model, simply keep using `FORCE_MODEL` as before — no need to set `MODEL_ALIASES`.
+If you only need a single model, keep `FORCE_MODEL` and leave `MODEL_ALIASES` empty. `/v1/models` then lists the built-in model IDs, and every request is sent to `FORCE_MODEL`.
 
 ```ini
 DEEPSEEK_API_KEY=sk-xxx
 DEFAULT_BACKEND=deepseek
 DEEPSEEK_UPSTREAM_MODE=anthropic
 FORCE_MODEL=deepseek-v4-flash-vision-exp
+MODEL_ALIASES=
 ```
 
-## Image Fallback (vision model for image requests)
+## Model mapping and /v1/models
 
-If the selected model is text-only (e.g. DeepSeek) but a request contains an image, the bridge can automatically route that request to a configured vision model (`image_fallback_mode=auto`). Configure the fallback via env vars:
+For every `POST /v1/messages`, the bridge resolves the requested model in this order:
 
-```ini
-IMAGE_FALLBACK_MODE=auto
-IMAGE_FALLBACK_BACKEND=deepseek
-IMAGE_FALLBACK_MODEL=deepseek-v4-flash-vision-exp
+1. **Alias match** — if the ID equals an entry's `id` in `MODEL_ALIASES`, that alias's `backend` and `model` are used.
+2. **Pattern fallback** — otherwise the backend stays `DEFAULT_BACKEND`, while `DEEPSEEK_MODEL_PATTERN` / `OPENAI_MODEL_PATTERN` / `CUSTOM_MODEL_PATTERN` can still select a different backend.
+3. **Force fallback** — if no mapping produced a model name, `FORCE_MODEL` is used (when set); with `FORCE_MODEL` unset the requested ID passes through unchanged.
+
+Claude Science's model menu contains both alias IDs and built-in IDs such as `gpt-4o`. A click on a model that is not an alias still reaches a working backend: it is sent as `FORCE_MODEL`. This is intentional — rejecting it would make the menu unusable — and the bridge logs one warning per distinct `requested -> forced` pair so the fallback stays observable.
+
+`GET /v1/models` returns:
+
+```json
+{"data":[{"id":"claude-haiku-4-5","display_name":"DeepSeek V4 Flash","type":"model"}],"has_more":false,"first_id":"claude-haiku-4-5","last_id":"claude-haiku-4-5"}
 ```
 
-By default the container uses exactly this setup: text requests go to DeepSeek official API, and image-bearing requests are handled by the DeepSeek vision model `deepseek-v4-flash-vision-exp`, avoiding errors from text-only models.
+`MODEL_LIST_MODE` selects what goes into `data`:
+
+| `MODEL_LIST_MODE` | `data` contents |
+|---|---|
+| `aliases` (also `alias`, `third_party`) | only `MODEL_ALIASES` entries; an empty alias list yields an empty list |
+| `builtin` (also `compat`) | only the built-in model list |
+| `aliases_first` (also `mixed`) | alias entries first, then built-ins, de-duplicated by `id` |
+| unset | `aliases` when `MODEL_ALIASES` is non-empty, otherwise `builtin` |
+
+An empty list is still a valid response: `data: []`, `has_more: false`, and `first_id` / `last_id` are `null`.
+
+## Image Handling
+
+Anthropic `image` blocks become OpenAI `image_url` content parts at their original position in the message (text and images keep the order they have in the Anthropic `content` array):
+
+- `source.type: "base64"` becomes `data:<media_type>;base64,<data>` — the `media_type` field supplies the MIME type and defaults to `image/png`.
+- `source.type: "url"` passes the `url` through unchanged.
+
+`INLINE_IMAGE_POLICY` decides which images are forwarded:
+
+| Value | Behavior |
+|---|---|
+| `preserve` (default) | keep every image |
+| `omit` | drop every image block |
+| `omit_inline` | drop base64 inline images, keep `http(s)` URL images |
+| `auto` | act like `omit` on the DeepSeek backend and `preserve` on the others |
+
+When every image in a user message is dropped, the bridge appends a short placeholder text block instead of sending an empty user message, which OpenAI-compatible upstreams reject with HTTP 400.
+
+`IMAGE_FALLBACK_MODE` / `IMAGE_FALLBACK_BACKEND` / `IMAGE_FALLBACK_MODEL` are still passed through by docker-compose but are **not implemented** in the Go bridge and currently have no effect. The default backend model (`deepseek-v4-flash-vision-exp`) is already a vision model, so images reach it directly without a fallback.
 
 ## Acknowledgements
 

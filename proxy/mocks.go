@@ -58,6 +58,7 @@ func fakeUser() map[string]any {
 		"organization_uuid":       fakeOrgUUID,
 		"org_uuid":                fakeOrgUUID,
 		"enabled_plugins":         []any{},
+		"subscription":            map[string]any{"type": "max", "status": "active"},
 		"subscription_type":       "max",
 		"rate_limit_tier":         "tier_5",
 		"seat_tier":               "enterprise_usage_based",

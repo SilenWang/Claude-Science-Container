@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -285,5 +287,168 @@ func TestNonV1PathFallsBackToCatchAll(t *testing.T) {
 	rec := doRequest(t, srv, http.MethodGet, "/not-a-route", "")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestModelsEmptyListEnvelope(t *testing.T) {
+	srv, cfg := newTestServer(t, "http://127.0.0.1:1")
+	cfg.ModelAliases = nil
+	cfg.ModelListMode = "aliases"
+
+	rec := doRequest(t, srv, http.MethodGet, "/v1/models", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	data, ok := out["data"].([]any)
+	if !ok || len(data) != 0 {
+		t.Fatalf("data = %#v", out["data"])
+	}
+	if out["has_more"] != false {
+		t.Fatalf("has_more = %#v", out["has_more"])
+	}
+	for _, key := range []string{"first_id", "last_id"} {
+		value, present := out[key]
+		if !present || value != nil {
+			t.Fatalf("%s = %#v (present=%t), want explicit null", key, value, present)
+		}
+	}
+}
+
+func TestMockAccountConsistency(t *testing.T) {
+	srv, _ := newTestServer(t, "http://127.0.0.1:1")
+
+	// 五个用户路径返回同一份用户体（同一 id、byok@localhost、max 订阅）。
+	var first []byte
+	for _, path := range []string{"/v1/userinfo", "/v1/me", "/v1/user", "/v1/profile", "/v1/account"} {
+		rec := doRequest(t, srv, http.MethodGet, path, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, body = %s", path, rec.Code, rec.Body.String())
+		}
+		if first == nil {
+			first = rec.Body.Bytes()
+		} else if string(first) != rec.Body.String() {
+			t.Fatalf("%s user body differs from /v1/userinfo:\n%s\nvs\n%s", path, first, rec.Body.String())
+		}
+		var user map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &user); err != nil {
+			t.Fatal(err)
+		}
+		if user["id"] != fakeAccountUUID || user["email"] != "byok@localhost" {
+			t.Fatalf("%s user = %#v", path, user)
+		}
+		if user["subscription_type"] != "max" {
+			t.Fatalf("%s subscription_type = %#v", path, user["subscription_type"])
+		}
+	}
+
+	// organization 三个路径返回同一个（常量）id。
+	var ids []any
+	for _, path := range []string{"/v1/organization", "/v1/organizations", "/v1/organizations/" + fakeOrgUUID} {
+		rec := doRequest(t, srv, http.MethodGet, path, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, body = %s", path, rec.Code, rec.Body.String())
+		}
+		var org map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &org); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, org["id"])
+	}
+	for _, id := range ids {
+		if id != fakeOrgUUID {
+			t.Fatalf("organization ids = %#v, want all %q", ids, fakeOrgUUID)
+		}
+	}
+}
+
+func TestTrailingSlashRoutesAreRegistered(t *testing.T) {
+	var hits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("unexpected upstream path %q", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, fakeOpenAIResponse)
+	}))
+	defer upstream.Close()
+
+	srv, _ := newTestServer(t, upstream.URL)
+
+	// /v1/messages/ 必须落到已实现路由，不能被兜底返回 {"ok":true}。
+	rec := doRequest(t, srv, http.MethodPost, "/v1/messages/", `{"max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"type":"message"`) {
+		t.Fatalf("messages/: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("messages/ was swallowed by catch-all: %s", rec.Body.String())
+	}
+	if hits != 1 {
+		t.Fatalf("upstream hits = %d", hits)
+	}
+
+	models := doRequest(t, srv, http.MethodGet, "/v1/models/", "")
+	if models.Code != http.StatusOK || !strings.Contains(models.Body.String(), `"display_name"`) {
+		t.Fatalf("models/: status = %d, body = %s", models.Code, models.Body.String())
+	}
+	user := doRequest(t, srv, http.MethodGet, "/v1/userinfo/", "")
+	if user.Code != http.StatusOK || !strings.Contains(user.Body.String(), "byok@localhost") {
+		t.Fatalf("userinfo/: status = %d, body = %s", user.Code, user.Body.String())
+	}
+	if got := normalizePath("/v1/models/"); got != "/v1/models" {
+		t.Fatalf("normalizePath(/v1/models/) = %q", got)
+	}
+}
+
+func TestForcedModelWarningLoggedOnce(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, fakeOpenAIResponse)
+	}))
+	defer upstream.Close()
+
+	srv, cfg := newTestServer(t, upstream.URL)
+	cfg.ForceModel = "deepseek-v4-flash-vision-exp"
+
+	var mu sync.Mutex
+	var warnings []string
+	srv.logf = func(format string, args ...any) {
+		message := fmt.Sprintf(format, args...)
+		if strings.Contains(message, "FORCE_MODEL") {
+			mu.Lock()
+			warnings = append(warnings, message)
+			mu.Unlock()
+		}
+	}
+
+	send := func(model string) {
+		t.Helper()
+		rec := doRequest(t, srv, http.MethodPost, "/v1/messages",
+			`{"model":"`+model+`","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("model %s: status = %d, body = %s", model, rec.Code, rec.Body.String())
+		}
+	}
+
+	// 同一 requested -> forced 组合：两次请求只打一条。
+	send("claude-unknown-9")
+	send("claude-unknown-9")
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %#v", warnings)
+	}
+
+	// 内置模型（gpt-4o）同样会被 FORCE_MODEL 顶替，也必须留下痕迹。
+	send("gpt-4o")
+	if len(warnings) != 2 {
+		t.Fatalf("warnings after builtin model = %#v", warnings)
+	}
+
+	// alias 命中的请求不会被 FORCE_MODEL 顶替，不告警。
+	cfg.ModelAliases = []modelAlias{{ID: "claude-haiku-4-5", Backend: "deepseek", Model: "mapped-model"}}
+	send("claude-haiku-4-5")
+	if len(warnings) != 2 {
+		t.Fatalf("warnings after alias = %#v", warnings)
 	}
 }
