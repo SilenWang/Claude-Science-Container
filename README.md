@@ -27,14 +27,16 @@ Run [Claude Science](https://claude.ai/science) Linux edition with a third-party
 
 ## API Bridge (Go)
 
-The bridge lives in `proxy/` and uses only the Go standard library. Build and test it through pixi:
+The bridge lives in `proxy/` and uses only the Go standard library. The Docker image compiles it in a `golang:1.26` build stage and copies a single static binary into the runtime layer: nothing is cloned from the upstream Python project, no patches are applied, and no venv/pip dependencies exist in the image. Build and test it through pixi:
 
 ```bash
 pixi run build_bridge   # builds proxy/api-bridge
 pixi run test_bridge    # go test ./...
 ```
 
-Configuration comes entirely from environment variables (`.env`). `api-bridge setup-token` is a placeholder until the fake-login milestone lands.
+Configuration comes entirely from environment variables (`.env`).
+
+`api-bridge setup-token` replaces the upstream `setup-token.py`. It reads `OAUTH_ENCRYPTION_KEY=` from `~/.claude-science/encryption.key`, encrypts a fake OAuth token with Fernet (AES-128-CBC + HMAC-SHA256, standard library only), and writes `~/.claude-science/.oauth-tokens/byok-user-000000000000000000.enc` (directory `0700`, file `0600`). It then reads the file back, decrypts it to verify, and prints `verified: token decrypts`.
 
 ## Current Status
 
@@ -42,7 +44,7 @@ The container successfully runs both claude-science and the API bridge. Key acco
 
 - **API routing works** — Claude Science routes Anthropic-style API calls through the bridge, which translates them to OpenAI-compatible third-party endpoints. Models are callable via the web UI.
 - **Environment-based configuration** — All API keys and backend options are read directly from environment variables by the Go bridge at startup; there is no `config.json` to rewrite.
-- **OAuth token auto-setup** — On first run, the entrypoint generates an encryption key and OAuth token for claude-science.
+- **OAuth token auto-setup** — On first run, the entrypoint lets claude-science create its encryption key if missing, then the Go bridge writes a Fernet-encrypted fake OAuth token. No upstream Python script is involved.
 - **Multiple backend support** — Custom (SiliconFlow, Moonshot, etc.), DeepSeek, and OpenAI backends are all supported. **The default is the DeepSeek official API** with model `deepseek-v4-flash-vision-exp` (displayed as "DeepSeek V4 Flash"); it is a vision model, so image requests go to it directly.
 - **Model menu and image input** — `GET /v1/models` serves the alias/built-in model list, and Anthropic image blocks (base64 or URL) are translated to OpenAI `image_url` parts according to `INLINE_IMAGE_POLICY`.
 
@@ -64,7 +66,7 @@ I am not a professional software developer, so the reasons for some of the featu
 
 - **MCP directory connectors unavailable**: The error that appears upon entering the settings interface does not seem to cause any appreciable effect in practice. According to the literature review, bioinformatics analysis can be carried out normally.
 -  **The `web_search` tool is unavailable**: Compatibility issue: OpenAI-compatible model endpoints do not provide the tool-calling capabilities of Anthropic-compatible endpoints, and therefore cannot use web search. For example, I encounter this issue when using DeepSeek in opencode-go, but when using the Anthropic-compatible endpoint of the official DeepSeek API, web search works normally.
-- **Text after `tool_calls` is dropped in streaming responses**: Once the bridge has opened a `tool_use` block, any later text delta from the same upstream response is discarded, because Anthropic content blocks are already closed in order. Anthropic normally does not emit text after tool calls, so this only affects non-conforming upstreams.
+- **Trailing text after a text block is dropped in streaming responses**: Once the bridge has already emitted a text block, any later text delta from the same upstream response is discarded, because Anthropic content blocks are closed in order. If the upstream sends `tool_calls` first and text afterwards, the bridge still opens a text block after the tool block, so that text is kept. Anthropic normally does not emit text after tool calls, so this only affects non-conforming upstreams.
 - **Built-in model IDs fall back to `FORCE_MODEL`**: This is intentional — the model menu must stay clickable — and each `requested -> forced` pair logs one warning. See [Model mapping](#model-mapping-and-v1models).
 - **Tasks terminate unexpectedly**: Tasks running on DeepSeek Flash sometimes terminate unexpectedly mid-execution, whereas DeepSeek Pro experiences this issue far less often.
 
@@ -235,7 +237,7 @@ All configuration is done via environment variables in `.env`:
 | `CUSTOM_BASE_URL` | API base URL (e.g., SiliconFlow, Moonshot) | — |
 | `DEEPSEEK_API_KEY` | API key for DeepSeek official API | — |
 | `DEEPSEEK_BASE_URL` | DeepSeek API base URL | `https://api.deepseek.com` |
-| `DEEPSEEK_UPSTREAM_MODE` | DeepSeek upstream protocol: `openai` or `anthropic` | `anthropic` |
+| `DEEPSEEK_UPSTREAM_MODE` | DeepSeek upstream protocol: `openai` (default); `anthropic` is accepted but logs a warning and is still treated as `openai` | `openai` |
 | `OPENAI_API_KEY` | API key for OpenAI backend | — |
 | `OPENAI_BASE_URL` | OpenAI API base URL | `https://api.openai.com` |
 | `DEFAULT_BACKEND` | Default backend selection: `custom`, `deepseek`, `openai` | `deepseek` |
@@ -257,44 +259,42 @@ All configuration is done via environment variables in `.env`:
 
 The bridge supports two fundamentally different API modes. Choosing the right one depends on your needs:
 
-| Feature | Custom (OpenAI style) | DeepSeek Anthropic style |
-|---------|----------------------|--------------------------|
-| **Configuration** | `CUSTOM_API_KEY` + `CUSTOM_BASE_URL` | `DEEPSEEK_API_KEY` + `DEEPSEEK_UPSTREAM_MODE=anthropic` |
-| **Protocol conversion** | Anthropic → OpenAI (via bridge translation) | Pass-through (direct Anthropic API) |
-| **Tool calls** | ❌ Unsupported — web search, native tool use not available | ✅ Fully supported |
+| Feature | Custom / third-party (OpenAI-compatible) | DeepSeek official API (OpenAI-compatible) |
+|---------|------------------------------------------|------------------------------------------|
+| **Configuration** | `CUSTOM_API_KEY` + `CUSTOM_BASE_URL` | `DEEPSEEK_API_KEY` (+ optional `DEEPSEEK_BASE_URL`) |
+| **Protocol conversion** | Anthropic → OpenAI (via bridge translation) | Anthropic → OpenAI (via bridge translation) |
+| **Tool calls** | ✅ Supported through translation | ✅ Supported through translation |
+| **Web search** | ❌ Not available | ❌ Not available |
 | **Model selection** | More third-party providers (SiliconFlow, Moonshot, etc.) | Limited to DeepSeek official models |
 
 ### Custom OpenAI API (`DEFAULT_BACKEND=custom`)
 
-When using third-party providers like SiliconFlow or Moonshot, the bridge converts Claude Science's Anthropic-format requests to OpenAI-compatible format. During this conversion, Anthropic-specific features — particularly **tool calls** — are lost. This means:
+When using third-party providers like SiliconFlow or Moonshot, the bridge converts Claude Science's Anthropic-format requests to OpenAI-compatible format. Tool calls (`tools` / `tool_use` / `tool_result`) are translated in both directions. Features that have no OpenAI-compatible equivalent are not available:
 
 - The **web search** tool in Claude Science will not function
 - Extended thinking is not available
-- Only basic text generation and code execution work
 
 **Recommended for**: Users who want access to a wide range of models from various providers and don't need web search.
 
-### DeepSeek Anthropic API (`DEFAULT_BACKEND=deepseek`, `DEEPSEEK_UPSTREAM_MODE=anthropic`) *(default)*
+### DeepSeek official API (`DEFAULT_BACKEND=deepseek`, `DEEPSEEK_UPSTREAM_MODE=openai`) *(default)*
 
-DeepSeek provides an official Anthropic-compatible API endpoint (`/anthropic/v1/messages`). When this mode is enabled, the bridge passes requests through **without format conversion**, preserving all Anthropic protocol features:
+The DeepSeek official API is OpenAI-compatible and goes through the same translation path as any other OpenAI-compatible upstream. `DEEPSEEK_UPSTREAM_MODE=anthropic` is accepted for backward compatibility, but the Go bridge logs a warning and still treats the upstream as OpenAI-compatible — there is no Anthropic pass-through.
 
-- The **web search** tool in Claude Science works normally
-- Tool calls and function calling are fully supported
-- All Anthropic message features are preserved
+- The **web search** tool in Claude Science will not function
+- Tool calls (`tools` / `tool_use` / `tool_result`) are supported through translation
+- Anthropic extended thinking is not forwarded
 
-**Recommended for**: Users who need web search, tool use, or want the best compatibility with Claude Science features.
-
-> ⚠️ **Note**: When using `DEEPSEEK_UPSTREAM_MODE=anthropic`, the `thinking` block is automatically stripped from requests since DeepSeek's Anthropic API does not support extended thinking (`thinking.type: "auto"` is not a valid value). This does not affect normal functionality.
+**Recommended for**: Users who want the DeepSeek official API with the default vision model and working tool calls.
 
 ### How to switch
 
 ```bash
-# Option 1 (default): DeepSeek official API with vision model (web search, tool support)
+# Option 1 (default): DeepSeek official API with vision model (tool support, no web search)
 DEEPSEEK_API_KEY=sk-xxx
 DEFAULT_BACKEND=deepseek
-DEEPSEEK_UPSTREAM_MODE=anthropic
+DEEPSEEK_UPSTREAM_MODE=openai
 # Default model deepseek-v4-flash-vision-exp is shown as "DeepSeek V4 Flash"
-# (set via MODEL_ALIASES); image requests fall back to it via IMAGE_FALLBACK_*.
+# (set via MODEL_ALIASES).
 
 # Option 2: Custom OpenAI API (wider model selection, no web search)
 CUSTOM_API_KEY=sk-xxx

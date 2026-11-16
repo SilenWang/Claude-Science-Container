@@ -35,6 +35,8 @@ WORKDIR /opt
 # 建 venv 或安装 pip 依赖，只拷一个静态二进制。
 COPY --from=bridge-build /out/api-bridge /opt/api-bridge/api-bridge
 RUN chmod 755 /opt/api-bridge/api-bridge
+# 运行层不应再有上游 Python 桥接的虚拟环境；构建期直接断言。
+RUN test ! -e /opt/api-bridge/.venv
 
 ARG CACHE_BUST
 

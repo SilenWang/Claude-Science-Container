@@ -86,12 +86,7 @@ apply_gpu_config() {
     local db="${CS_HOME}/operon-cli.db"
     if [ -f "$db" ]; then
         # json_set 只改顶层帧的 _original_input.gpu_mode，其余字段与子帧保持原样。
-        sqlite3 "$db" <<'SQL' 2>/dev/null || true
-UPDATE frames
-   SET context_data = json_set(context_data, '$._original_input.gpu_mode', 'on')
- WHERE parent_frame_id IS NULL
-   AND json_extract(context_data, '$._original_input.gpu_mode') = 'off';
-SQL
+        sqlite3 "$db" "UPDATE frames SET context_data = json_set(context_data, '\$._original_input.gpu_mode', 'on') WHERE parent_frame_id IS NULL AND json_extract(context_data, '\$._original_input.gpu_mode') = 'off';" 2>/dev/null || true
     fi
 }
 

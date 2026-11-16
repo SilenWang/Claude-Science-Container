@@ -27,9 +27,10 @@ func main() {
 	case "version", "-v", "--version":
 		fmt.Printf("api-bridge %s\n", version)
 	case "setup-token":
-		// M5 才实现：写 ~/.claude-science/.oauth-tokens/*.enc（标准库 Fernet）。
-		fmt.Fprintln(os.Stderr, "api-bridge setup-token: not implemented yet (planned for M5)")
-		os.Exit(1)
+		if err := runSetupToken(os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "api-bridge setup-token: %v\n", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n", os.Args[1])
 		usage()
