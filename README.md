@@ -23,14 +23,25 @@ Run [Claude Science](https://claude.ai/science) Linux edition with a third-party
 ```
 
 - **claude-science** — The official Claude Science Linux binary, configured to route API calls through the internal API bridge.
-- **API Bridge** — Translates Anthropic-style API calls from Claude Science to OpenAI-compatible third-party endpoints (DeepSeek, SiliconFlow, Moonshot, etc.). Based on [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
+- **API Bridge** — Translates Anthropic-style API calls from Claude Science to OpenAI-compatible third-party endpoints (DeepSeek, SiliconFlow, Moonshot, etc.). Implemented in Go under `proxy/` (standard library only); its route and translation conventions follow [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
+
+## API Bridge (Go)
+
+The bridge lives in `proxy/` and uses only the Go standard library. Build and test it through pixi:
+
+```bash
+pixi run build_bridge   # builds proxy/api-bridge
+pixi run test_bridge    # go test ./...
+```
+
+Configuration comes entirely from environment variables (`.env`). `api-bridge setup-token` is a placeholder until the fake-login milestone lands.
 
 ## Current Status
 
 The container successfully runs both claude-science and the API bridge. Key accomplishments:
 
 - **API routing works** — Claude Science routes Anthropic-style API calls through the bridge, which translates them to OpenAI-compatible third-party endpoints. Models are callable via the web UI.
-- **Environment-based configuration** — All API keys and backend options are configurable via environment variables; the entrypoint script (`apply_config`) writes them into the bridge's `config.json` at startup.
+- **Environment-based configuration** — All API keys and backend options are read directly from environment variables by the Go bridge at startup; there is no `config.json` to rewrite.
 - **OAuth token auto-setup** — On first run, the entrypoint generates an encryption key and OAuth token for claude-science.
 - **Multiple backend support** — Custom (SiliconFlow, Moonshot, etc.), DeepSeek, and OpenAI backends are all supported. **The default is the DeepSeek official API** with model `deepseek-v4-flash-vision-exp` (displayed as "DeepSeek V4 Flash"), and image requests fall back to the same vision model.
 
@@ -290,7 +301,7 @@ DEFAULT_BACKEND=custom
 MODEL_ALIASES=
 ```
 
-For more detailed configuration instructions, please refer to the documentation in the [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge).
+For the full environment-variable list, see `.env.example` and `proxy/config.go`. The route and translation conventions follow the [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) project.
 
 ## Ports
 
@@ -360,7 +371,7 @@ By default the container uses exactly this setup: text requests go to DeepSeek o
 
 ## Acknowledgements
 
-This project uses [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208) as the API translation layer. All credit for the bridge's backend configuration options and protocol translation logic goes to the original project.
+This project's API bridge (`proxy/`) started from the route and translation conventions of [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208), and is now an independent Go implementation that uses only the standard library.
 
 ## License
 

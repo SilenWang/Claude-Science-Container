@@ -1,3 +1,10 @@
+# /opt/api-bridge 的 Go 实现：只用标准库，构建阶段产出静态二进制。
+# 代码与 pixi 的 build_bridge / test_bridge 任务共用同一份 proxy/ 源码。
+FROM golang:1.26 AS bridge-build
+WORKDIR /src
+COPY proxy/ ./proxy/
+RUN cd proxy && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api-bridge .
+
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -13,11 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     gh \
-    patch \
     p7zip \
     python3 \
-    python3-venv \
-    python3-pip \
+    sqlite3 \
     supervisor \
     locales \
     fonts-noto-cjk \
@@ -26,20 +31,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt
 
-COPY scripts/patches/ /tmp/patches/
-
-RUN git clone --depth 1 https://github.com/Jyx0208/claude-science-api-bridge.git /opt/api-bridge && \
-    rm -rf /opt/api-bridge/.git && \
-    patch -p1 -d /opt/api-bridge < /tmp/patches/0001-strip-thinking-block.patch && \
-    patch -p1 -d /opt/api-bridge < /tmp/patches/0002-kimi-k-series-vision.patch && \
-    patch -p1 -d /opt/api-bridge < /tmp/patches/0003-deepseek-vision-fallback.patch && \
-    rm -rf /tmp/patches
-
-RUN python3 -m venv /opt/api-bridge/.venv && \
-    /opt/api-bridge/.venv/bin/pip3 install --no-cache-dir --upgrade pip && \
-    /opt/api-bridge/.venv/bin/pip3 install --no-cache-dir -r /opt/api-bridge/requirements.txt && \
-    cp /opt/api-bridge/config.example.json /opt/api-bridge/config.json && \
-    chmod 600 /opt/api-bridge/config.json
+# 替换上游 Jyx0208/claude-science-api-bridge（Python）：不再 clone、打 patch、
+# 建 venv 或安装 pip 依赖，只拷一个静态二进制。
+COPY --from=bridge-build /out/api-bridge /opt/api-bridge/api-bridge
+RUN chmod 755 /opt/api-bridge/api-bridge
 
 ARG CACHE_BUST
 
