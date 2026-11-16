@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -55,15 +56,78 @@ type anthropicImageSource struct {
 type translation struct {
 	// toolNames 是 OpenAI 安全名 -> Anthropic 原名，用于把响应的工具名回填。
 	toolNames map[string]string
+	// toolOriginals 是 Anthropic 原名 -> OpenAI 安全名，保证同一个原名每次登记都得到同一个安全名。
+	toolOriginals map[string]string
 }
 
 var toolNameRe = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
+
+// maxToolNameLen 是 OpenAI 对 function name 的长度上限。
+const maxToolNameLen = 64
+
+func newTranslation() *translation {
+	return &translation{
+		toolNames:     map[string]string{},
+		toolOriginals: map[string]string{},
+	}
+}
+
+// registerToolName 把 Anthropic 工具名换成 OpenAI 安全名并登记双向映射，返回安全名。
+//   - 同一个原名重复登记返回同一个安全名（历史 assistant 的 tool_use 与 tools 列表能对上）。
+//   - 两个不同原名 sanitize 后撞车时，后来的追加 _2/_3 后缀，保证上游回来的名字
+//     能一一回填到各自原名，不会互相串错。
+func (tr *translation) registerToolName(original, fallback string) string {
+	if tr.toolNames == nil {
+		tr.toolNames = map[string]string{}
+	}
+	if tr.toolOriginals == nil {
+		tr.toolOriginals = map[string]string{}
+	}
+	if original == "" {
+		original = fallback
+	}
+	if safe, ok := tr.toolOriginals[original]; ok && safe != "" {
+		return safe
+	}
+	base := normalizeToolName(original, fallback)
+	safe := base
+	for n := 2; ; n++ {
+		existing, taken := tr.toolNames[safe]
+		if !taken || existing == original {
+			break
+		}
+		safe = suffixToolName(base, n)
+	}
+	tr.toolNames[safe] = original
+	tr.toolOriginals[original] = safe
+	return safe
+}
+
+// originalToolName 把上游返回的安全名还原成 Anthropic 原名；未登记的原样返回。
+func (tr *translation) originalToolName(safe string) string {
+	if original, ok := tr.toolNames[safe]; ok && original != "" {
+		return original
+	}
+	return safe
+}
+
+func suffixToolName(base string, n int) string {
+	suffix := "_" + strconv.Itoa(n)
+	if len(base)+len(suffix) > maxToolNameLen {
+		base = base[:maxToolNameLen-len(suffix)]
+	}
+	return base + suffix
+}
 
 // anthropicToOpenAI 把 Anthropic Messages 请求翻译成 OpenAI Chat Completions 请求。
 // stream 由 req.Stream 决定：M2 起流式请求会把 stream=true 透传给上游。
 func anthropicToOpenAI(req *anthropicRequest, backendModel string, cfg *config, backendName string) (map[string]any, *translation, error) {
 	messages := make([]map[string]any, 0, len(req.Messages)+1)
-	tr := &translation{toolNames: map[string]string{}}
+	tr := newTranslation()
+
+	// 工具先登记：tools 里声明过的名字优先占用安全名，历史 assistant 的 tool_use
+	// 随后复用同一份映射，避免同一次请求里两处得到不同的名字。
+	tools := translateTools(req.Tools, tr)
 
 	if system := systemText(req.System); system != "" {
 		messages = append(messages, map[string]any{"role": "system", "content": system})
@@ -105,7 +169,7 @@ func anthropicToOpenAI(req *anthropicRequest, backendModel string, cfg *config, 
 		body["stop"] = req.StopSequences
 	}
 
-	if tools := translateTools(req.Tools, tr); len(tools) > 0 {
+	if len(tools) > 0 {
 		body["tools"] = tools
 		if choice := convertToolChoice(req.ToolChoice, tr, backendName); choice != nil {
 			body["tool_choice"] = choice
@@ -211,10 +275,13 @@ func translateUserMessage(msg anthropicMessage, imagePolicy string) []map[string
 		content = joined
 	}
 
-	out := toolMessages
+	// 顺序固定为「先 text 再 tool」：同一个 user 消息里混合正文与 tool_result 时，
+	// 正文作为 user 消息在前，tool 消息按块内出现顺序跟在后面。
+	out := make([]map[string]any, 0, len(toolMessages)+1)
 	if content != "" {
 		out = append(out, map[string]any{"role": "user", "content": content})
 	}
+	out = append(out, toolMessages...)
 	return out
 }
 
@@ -233,12 +300,7 @@ func translateAssistantMessage(msg anthropicMessage, tr *translation) map[string
 				textParts = append(textParts, block.Text)
 			}
 		case "tool_use":
-			name := block.Name
-			if name == "" {
-				name = "tool_0"
-			}
-			safe := normalizeToolName(name, "tool_0")
-			tr.toolNames[safe] = name
+			safe := tr.registerToolName(block.Name, "tool_0")
 			args := "{}"
 			if len(block.Input) > 0 {
 				if b, err := json.Marshal(block.Input); err == nil {
@@ -353,12 +415,7 @@ func translateTools(tools []anthropicTool, tr *translation) []map[string]any {
 	out := make([]map[string]any, 0, len(tools))
 	for idx, tool := range tools {
 		fallback := fmt.Sprintf("tool_%d", idx)
-		original := tool.Name
-		if original == "" {
-			original = fallback
-		}
-		safe := normalizeToolName(original, fallback)
-		tr.toolNames[safe] = original
+		safe := tr.registerToolName(tool.Name, fallback)
 		out = append(out, map[string]any{
 			"type": "function",
 			"function": map[string]any{
@@ -407,14 +464,8 @@ func convertToolChoice(raw json.RawMessage, tr *translation, backendName string)
 	}
 	switch choice.Type {
 	case "tool":
-		name := choice.Name
-		for safe, original := range tr.toolNames {
-			if original == name {
-				name = safe
-				break
-			}
-		}
-		return map[string]any{"type": "function", "function": map[string]any{"name": normalizeToolName(name, "tool_0")}}
+		name := tr.registerToolName(choice.Name, "tool_0")
+		return map[string]any{"type": "function", "function": map[string]any{"name": name}}
 	case "any":
 		return "required"
 	case "auto":
@@ -482,10 +533,7 @@ func openAIToAnthropic(resp *openAIResponse, originalModel, requestID string, tr
 			if id == "" {
 				id = "toolu_" + randomHex(12)
 			}
-			name := call.Function.Name
-			if original, ok := tr.toolNames[name]; ok && original != "" {
-				name = original
-			}
+			name := tr.originalToolName(call.Function.Name)
 			hasToolUse = true
 			content = append(content, map[string]any{
 				"type":  "tool_use",

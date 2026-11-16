@@ -91,10 +91,16 @@ type openAIStreamChunk struct {
 	} `json:"error"`
 }
 
+// toolCallState 跟踪一个上游 tool_call 从增量到 Anthropic content block 的状态。
 type toolCallState struct {
-	id   string
-	name string
-	args strings.Builder
+	upstreamIndex int
+	id            string
+	name          string
+	// pending 是已收到、还没下发的 arguments 原始片段。绝不重新序列化。
+	pending        strings.Builder
+	anthropicIndex int
+	started        bool
+	stopped        bool
 }
 
 // streamState 把 OpenAI 增量拼成 Anthropic 内容块。
@@ -106,11 +112,16 @@ type streamState struct {
 	nextIndex   int
 	textIndex   int
 	textStarted bool
+	textStopped bool
 
-	toolCalls map[int]*toolCallState
+	// tools 按上游 tool_calls[].index 升序排列；nextOpenPos 指向第一个还没打开的块，
+	// 保证 Anthropic 的 block index 严格按上游顺序分配（文本块占 0，工具从 1 起）。
+	tools       []*toolCallState
+	nextOpenPos int
 
 	finishReason string
 	outputTokens int
+	finished     bool
 }
 
 func newStreamState(requestID, model string, tr *translation) *streamState {
@@ -118,7 +129,6 @@ func newStreamState(requestID, model string, tr *translation) *streamState {
 		requestID: requestID,
 		model:     model,
 		tr:        tr,
-		toolCalls: map[int]*toolCallState{},
 	}
 }
 
@@ -148,8 +158,31 @@ func (st *streamState) startTextBlock(out *sseWriter) error {
 	})
 }
 
-// consume 处理一条上游 data；返回是否收到 finish_reason、是否下发了文本增量。
-func (st *streamState) consume(out *sseWriter, data string) (finished, emittedDelta bool, err error) {
+// stopTextBlock 在第一个工具块开始前关闭文本块：Anthropic 的块按 index 顺序出现。
+func (st *streamState) stopTextBlock(out *sseWriter) error {
+	if !st.textStarted || st.textStopped {
+		return nil
+	}
+	st.textStopped = true
+	return out.event("content_block_stop", map[string]any{"index": st.textIndex})
+}
+
+// emitText 下发文本增量；文本块一旦关闭（后面接了工具块）就不再重开。
+func (st *streamState) emitText(out *sseWriter, text string) error {
+	if st.textStopped {
+		return nil
+	}
+	if err := st.startTextBlock(out); err != nil {
+		return err
+	}
+	return out.event("content_block_delta", map[string]any{
+		"index": st.textIndex,
+		"delta": map[string]any{"type": "text_delta", "text": text},
+	})
+}
+
+// consume 处理一条上游 data；返回是否收到 finish_reason、本帧是否带来增量内容。
+func (st *streamState) consume(out *sseWriter, data string) (finished, activity bool, err error) {
 	var chunk openAIStreamChunk
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 		return false, false, fmt.Errorf("invalid JSON in upstream stream: %w", err)
@@ -170,90 +203,165 @@ func (st *streamState) consume(out *sseWriter, data string) (finished, emittedDe
 
 	for _, choice := range chunk.Choices {
 		if text := openAIContentText(choice.Delta.Content); text != "" {
-			if err := st.startTextBlock(out); err != nil {
-				return false, false, err
+			activity = true
+			if err := st.emitText(out, text); err != nil {
+				return false, activity, err
 			}
-			if err := out.event("content_block_delta", map[string]any{
-				"index": st.textIndex,
-				"delta": map[string]any{"type": "text_delta", "text": text},
-			}); err != nil {
-				return false, false, err
-			}
-			emittedDelta = true
 		}
-		for _, call := range choice.Delta.ToolCalls {
-			st.addToolCall(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
+		if len(choice.Delta.ToolCalls) > 0 {
+			activity = true
+			for _, call := range choice.Delta.ToolCalls {
+				st.addToolCall(call.Index, call.ID, call.Function.Name, call.Function.Arguments)
+			}
+			if err := st.pumpTools(out, false); err != nil {
+				return false, activity, err
+			}
 		}
 		if choice.FinishReason != nil {
 			st.finishReason = *choice.FinishReason
 			finished = true
 		}
 	}
-	return finished, emittedDelta, nil
+	return finished, activity, nil
+}
+
+// toolState 取（或按上游 index 升序插入）一个 tool_call 的状态。
+func (st *streamState) toolState(upstreamIndex int) *toolCallState {
+	pos := sort.Search(len(st.tools), func(i int) bool {
+		return st.tools[i].upstreamIndex >= upstreamIndex
+	})
+	if pos < len(st.tools) && st.tools[pos].upstreamIndex == upstreamIndex {
+		return st.tools[pos]
+	}
+	call := &toolCallState{upstreamIndex: upstreamIndex}
+	st.tools = append(st.tools, nil)
+	copy(st.tools[pos+1:], st.tools[pos:])
+	st.tools[pos] = call
+	// 插到了已经处理过的位置之前：游标跟着右移，避免重复打开同一个块。
+	if pos < st.nextOpenPos {
+		st.nextOpenPos++
+	}
+	return call
 }
 
 func (st *streamState) addToolCall(index int, id, name, arguments string) {
-	call, ok := st.toolCalls[index]
-	if !ok {
-		call = &toolCallState{}
-		st.toolCalls[index] = call
+	call := st.toolState(index)
+	call.id = mergeDeltaField(call.id, id)
+	call.name = mergeDeltaField(call.name, name)
+	// 原样累积上游 arguments 片段，收尾/开块时原样作为 partial_json 下发。
+	call.pending.WriteString(arguments)
+}
+
+// mergeDeltaField 容忍上游把 id/name 拆成多帧增量下发，也容忍每帧重复下发完整值。
+func mergeDeltaField(current, incoming string) string {
+	if incoming == "" || incoming == current {
+		return current
 	}
-	if id != "" {
-		call.id = id
+	if current == "" {
+		return incoming
 	}
-	if name != "" {
-		call.name = name
+	if strings.HasPrefix(incoming, current) {
+		return incoming
 	}
-	call.args.WriteString(arguments)
+	if strings.HasPrefix(current, incoming) {
+		return current
+	}
+	return incoming
+}
+
+// startToolBlock 打开一个 tool_use 块：id 原样透传上游 tool_call.id，name 回填 Anthropic 原名。
+func (st *streamState) startToolBlock(out *sseWriter, call *toolCallState) error {
+	if err := st.stopTextBlock(out); err != nil {
+		return err
+	}
+	name := call.name
+	if name == "" {
+		name = "tool"
+	}
+	id := call.id
+	if id == "" {
+		id = "toolu_" + randomHex(12)
+	}
+	call.anthropicIndex = st.nextIndex
+	st.nextIndex++
+	call.started = true
+	return out.event("content_block_start", map[string]any{
+		"index": call.anthropicIndex,
+		"content_block": map[string]any{
+			"type":  "tool_use",
+			"id":    id,
+			"name":  st.tr.originalToolName(name),
+			"input": map[string]any{},
+		},
+	})
+}
+
+// pumpTools 按上游顺序打开工具块并下发已缓冲的 arguments 片段。
+// force=false 时只打开「name/id 已到齐且已有参数」的块，保证上手就能真增量；
+// 并行调用里靠后的工具会等前面的块先打开（block index 必须升序）。
+func (st *streamState) pumpTools(out *sseWriter, force bool) error {
+	for st.nextOpenPos < len(st.tools) {
+		call := st.tools[st.nextOpenPos]
+		if call.started {
+			st.nextOpenPos++
+			continue
+		}
+		ready := force || (call.name != "" && call.id != "" && call.pending.Len() > 0)
+		if !ready {
+			break
+		}
+		if err := st.startToolBlock(out, call); err != nil {
+			return err
+		}
+		st.nextOpenPos++
+	}
+
+	// 已打开的块：新到的片段立刻作为 input_json_delta 原样下发。
+	for _, call := range st.tools {
+		if !call.started || call.pending.Len() == 0 {
+			continue
+		}
+		partial := call.pending.String()
+		call.pending.Reset()
+		if err := out.event("content_block_delta", map[string]any{
+			"index": call.anthropicIndex,
+			"delta": map[string]any{"type": "input_json_delta", "partial_json": partial},
+		}); err != nil {
+			return err
+		}
+	}
+
+	if force {
+		for _, call := range st.tools {
+			if !call.started || call.stopped {
+				continue
+			}
+			call.stopped = true
+			if err := out.event("content_block_stop", map[string]any{"index": call.anthropicIndex}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // finish 按 Anthropic 顺序补齐 content_block_stop → message_delta → message_stop。
 // 无论是正常结束、上游 EOF，还是上游没给 finish_reason，都走这里收尾。
 func (st *streamState) finish(out *sseWriter) {
-	if st.textStarted || len(st.toolCalls) == 0 {
-		if err := st.startTextBlock(out); err == nil {
-			_ = out.event("content_block_stop", map[string]any{"index": st.textIndex})
-		}
+	if st.finished {
+		return
 	}
+	st.finished = true
 
-	indexes := make([]int, 0, len(st.toolCalls))
-	for index := range st.toolCalls {
-		indexes = append(indexes, index)
+	// 没有任何内容时补一个空文本块，保持 M1/M2 的空回复行为。
+	if !st.textStarted && len(st.tools) == 0 {
+		_ = st.startTextBlock(out)
 	}
-	sort.Ints(indexes)
-	for _, key := range indexes {
-		call := st.toolCalls[key]
-		index := st.nextIndex
-		st.nextIndex++
-
-		name := call.name
-		if original, ok := st.tr.toolNames[name]; ok && original != "" {
-			name = original
-		}
-		id := call.id
-		if id == "" {
-			id = "toolu_" + randomHex(12)
-		}
-		_ = out.event("content_block_start", map[string]any{
-			"index": index,
-			"content_block": map[string]any{
-				"type":  "tool_use",
-				"id":    id,
-				"name":  name,
-				"input": map[string]any{},
-			},
-		})
-		if args := call.args.String(); args != "" {
-			_ = out.event("content_block_delta", map[string]any{
-				"index": index,
-				"delta": map[string]any{"type": "input_json_delta", "partial_json": args},
-			})
-		}
-		_ = out.event("content_block_stop", map[string]any{"index": index})
-	}
+	_ = st.stopTextBlock(out)
+	_ = st.pumpTools(out, true)
 
 	stopReason := mapFinishReason(st.finishReason)
-	if len(st.toolCalls) > 0 {
+	if len(st.tools) > 0 {
 		stopReason = "tool_use"
 	}
 	_ = out.event("message_delta", map[string]any{
@@ -386,13 +494,14 @@ func (s *server) handleMessagesStream(w http.ResponseWriter, r *http.Request, re
 			state.finish(out)
 			return true
 		}
-		finished, delta, consumeErr := state.consume(out, data)
+		finished, activity, consumeErr := state.consume(out, data)
 		if consumeErr != nil {
 			s.logf("[bridge] stream consume error: %v", consumeErr)
 			emitUpstreamError(consumeErr.Error())
 			return true
 		}
-		if delta {
+		// 只有上游真有增量（文本或工具参数）才重置计时：ping 只在空闲时出现。
+		if activity {
 			resetSSETimer(timer, ssePingInterval)
 		}
 		if finished {

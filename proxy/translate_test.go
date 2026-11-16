@@ -123,13 +123,14 @@ func TestToolResultAndToolUse(t *testing.T) {
 		t.Fatalf("arguments = %q", fn["arguments"])
 	}
 
-	toolMsg := msgs[1]
-	if toolMsg["role"] != "tool" || toolMsg["tool_call_id"] != "toolu_1" || toolMsg["content"] != "sunny" {
-		t.Fatalf("tool message = %#v", toolMsg)
-	}
-	userMsg := msgs[2]
+	// 一条 user 消息里混合 text 与 tool_result：顺序固定为「先 text 后 tool」。
+	userMsg := msgs[1]
 	if userMsg["role"] != "user" || userMsg["content"] != "thanks" {
 		t.Fatalf("user message = %#v", userMsg)
+	}
+	toolMsg := msgs[2]
+	if toolMsg["role"] != "tool" || toolMsg["tool_call_id"] != "toolu_1" || toolMsg["content"] != "sunny" {
+		t.Fatalf("tool message = %#v", toolMsg)
 	}
 
 	tools := body["tools"].([]map[string]any)
