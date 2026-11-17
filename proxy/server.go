@@ -261,8 +261,8 @@ func (s *server) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 // warnForcedModel 在请求模型没有 alias 映射、最终被 FORCE_MODEL 顶替时打一条
-// 警告。内置模型（如 gpt-4o）同样会走这条回落，因此也在这里留下痕迹，不静默。
-// 同一 requested -> forced 组合只打一次。
+// 警告。内置模型（如 gpt-4o）在对应后端没配 API key 时同样会走这条回落，
+// 因此也在这里留下痕迹，不静默。同一 requested -> forced 组合只打一次。
 func (s *server) warnForcedModel(requested, backendModel string) {
 	forced := strings.TrimSpace(s.cfg.ForceModel)
 	if forced == "" || backendModel != forced || requested == forced {
@@ -279,7 +279,7 @@ func (s *server) warnForcedModel(requested, backendModel string) {
 	}
 	s.warnedModels[key] = true
 	s.warnMu.Unlock()
-	s.logf("[bridge] WARNING: requested model %q has no MODEL_ALIASES mapping and was replaced by FORCE_MODEL %q", requested, forced)
+	s.logf("[bridge] WARNING: requested model %q was replaced by FORCE_MODEL %q (no MODEL_ALIASES mapping, or the backend matched by *_MODEL_PATTERN has no API key)", requested, forced)
 }
 
 func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {

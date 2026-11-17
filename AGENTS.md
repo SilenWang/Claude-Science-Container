@@ -45,9 +45,9 @@ All via `.env` → docker-compose env vars → the bridge reads them directly at
 |---|---|
 | `CUSTOM_API_KEY` + `CUSTOM_BASE_URL` | Primary backend (SiliconFlow, Moonshot) |
 | `DEFAULT_BACKEND` | `custom`, `deepseek`, or `openai` |
-| `FORCE_MODEL` | Override model name |
+| `FORCE_MODEL` | Model used when no alias/pattern match applies (default `deepseek-flash`) |
 | `CUSTOM_UPSTREAM_MODE` | `openai` (default) or `anthropic` |
-| `INLINE_IMAGE_POLICY` | `preserve` (default), `omit`, `omit_inline`, `auto` |
+| `INLINE_IMAGE_POLICY` | `omit_inline` (default), `omit`, `preserve`, `auto` |
 | `*_MODEL_PATTERN` | Regex for model matching per backend |
 
 ## Key files

@@ -18,11 +18,12 @@ services:
       CUSTOM_API_KEY: "${CUSTOM_API_KEY:-}"
       CUSTOM_BASE_URL: "${CUSTOM_BASE_URL:-}"
       DEFAULT_BACKEND: "${DEFAULT_BACKEND:-deepseek}"
-      FORCE_MODEL: "${FORCE_MODEL:-deepseek-v4-flash-vision-exp}"
+      # deepseek-flash 是 DeepSeek 官方默认文本模型；纯文本，没有视觉出口。
+      FORCE_MODEL: "${FORCE_MODEL:-deepseek-flash}"
       CUSTOM_UPSTREAM_MODE: "${CUSTOM_UPSTREAM_MODE:-openai}"
-      INLINE_IMAGE_POLICY: "${INLINE_IMAGE_POLICY:-preserve}"
+      INLINE_IMAGE_POLICY: "${INLINE_IMAGE_POLICY:-omit_inline}"
       REASONING_CONTENT_POLICY: "${REASONING_CONTENT_POLICY:-auto}"
-      MODEL_ALIASES: '${MODEL_ALIASES:-[{"id":"claude-haiku-4-5","display_name":"DeepSeek V4 Flash","backend":"deepseek","model":"deepseek-v4-flash-vision-exp"}]}'
+      MODEL_ALIASES: '${MODEL_ALIASES:-[{"id":"claude-haiku-4-5","display_name":"DeepSeek Flash","backend":"deepseek","model":"deepseek-flash"}]}'
       MODEL_LIST_MODE: "${MODEL_LIST_MODE:-}"
       MODEL_MENU_STRATEGY: "${MODEL_MENU_STRATEGY:-}"
       DEEPSEEK_MODEL_PATTERN: "${DEEPSEEK_MODEL_PATTERN:-}"
@@ -30,7 +31,7 @@ services:
       CUSTOM_MODEL_PATTERN: "${CUSTOM_MODEL_PATTERN:-}"
       IMAGE_FALLBACK_MODE: "${IMAGE_FALLBACK_MODE:-auto}"
       IMAGE_FALLBACK_BACKEND: "${IMAGE_FALLBACK_BACKEND:-deepseek}"
-      IMAGE_FALLBACK_MODEL: "${IMAGE_FALLBACK_MODEL:-deepseek-v4-flash-vision-exp}"
+      IMAGE_FALLBACK_MODEL: "${IMAGE_FALLBACK_MODEL:-deepseek-flash}"
       ENABLE_GPU: "${ENABLE_GPU:-auto}"
     volumes:
       - ./data/claude-science-data:/root/.claude-science
