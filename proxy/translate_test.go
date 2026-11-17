@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -15,8 +16,10 @@ func testConfig(backendName, baseURL string) *config {
 		ProxyHost:         "127.0.0.1",
 		ProxyPort:         9876,
 		backends: map[string]*backend{
-			"deepseek": {name: "deepseek", baseURL: normalizeBaseURL(baseURL), apiKey: "test-key"},
-			"openai":   {name: "openai", baseURL: normalizeBaseURL(baseURL), apiKey: "test-key"},
+			// modelPattern 与 newConfigFromEnv 的默认值一致：resolve 的
+			// pattern 路由依赖它，测试夹具不能漏。
+			"deepseek": {name: "deepseek", baseURL: normalizeBaseURL(baseURL), apiKey: "test-key", modelPattern: regexp.MustCompile(`(?i)deepseek|deep-seek`)},
+			"openai":   {name: "openai", baseURL: normalizeBaseURL(baseURL), apiKey: "test-key", modelPattern: regexp.MustCompile(`(?i)^(gpt-|o1|o3|o4|chatgpt)`)},
 			"custom":   {name: "custom", baseURL: normalizeBaseURL(baseURL), apiKey: "test-key"},
 		},
 	}
@@ -291,11 +294,11 @@ func TestNormalizeBaseURL(t *testing.T) {
 
 func TestModelListModes(t *testing.T) {
 	cfg := testConfig("deepseek", "http://upstream")
-	cfg.ModelAliases = []modelAlias{{ID: "claude-haiku-4-5", DisplayName: "DeepSeek V4 Flash", Backend: "deepseek", Model: "deepseek-v4-flash-vision-exp"}}
+	cfg.ModelAliases = []modelAlias{{ID: "claude-haiku-4-5", DisplayName: "DeepSeek Flash", Backend: "deepseek", Model: "deepseek-flash"}}
 
 	cfg.ModelListMode = "aliases"
 	models := cfg.modelList()
-	if len(models) != 1 || models[0]["id"] != "claude-haiku-4-5" || models[0]["display_name"] != "DeepSeek V4 Flash" {
+	if len(models) != 1 || models[0]["id"] != "claude-haiku-4-5" || models[0]["display_name"] != "DeepSeek Flash" {
 		t.Fatalf("aliases mode = %#v", models)
 	}
 

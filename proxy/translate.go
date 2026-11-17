@@ -287,9 +287,9 @@ func openAIContentParts(parts []map[string]any) any {
 }
 
 // imageOmitted 实现 INLINE_IMAGE_POLICY 的三档语义：
-//   - preserve：全部保留（默认）
+//   - preserve：全部保留
 //   - omit：丢弃所有图片块（base64 内联图与 http(s) URL 图都丢）
-//   - omit_inline：只丢 base64 data: 内联图，保留 http(s) URL 图
+//   - omit_inline：只丢 base64 data: 内联图，保留 http(s) URL 图（默认）
 func imageOmitted(url, policy string) bool {
 	switch strings.ToLower(strings.TrimSpace(policy)) {
 	case "omit":
@@ -433,7 +433,9 @@ func imagePolicyFor(backendName, configured string) string {
 	case "preserve", "omit", "omit_inline":
 		return strings.ToLower(strings.TrimSpace(configured))
 	}
-	// auto：DeepSeek 官方接口的历史行为是不接受图片，其余上游按原样转发。
+	// auto：按后端推断——DeepSeek 官方接口的历史行为是不接受图片，其余上游按原样转发。
+	// 这不是默认值：默认是 omit_inline，因为默认模型 deepseek-flash 是纯文本模型，
+	// 与后端无关都该丢内联图。auto 留给显式选择了视觉后端的用户。
 	if backendName == "deepseek" {
 		return "omit"
 	}

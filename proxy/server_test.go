@@ -178,7 +178,7 @@ func TestHealthEndpoint(t *testing.T) {
 
 func TestMockEndpoints(t *testing.T) {
 	srv, cfg := newTestServer(t, "http://127.0.0.1:1")
-	cfg.ModelAliases = []modelAlias{{ID: "claude-haiku-4-5", DisplayName: "DeepSeek V4 Flash", Backend: "deepseek", Model: "deepseek-v4-flash-vision-exp"}}
+	cfg.ModelAliases = []modelAlias{{ID: "claude-haiku-4-5", DisplayName: "DeepSeek Flash", Backend: "deepseek", Model: "deepseek-flash"}}
 	cfg.ModelListMode = "aliases"
 
 	models := doRequest(t, srv, http.MethodGet, "/v1/models", "")
@@ -194,7 +194,7 @@ func TestMockEndpoints(t *testing.T) {
 		t.Fatalf("models data = %#v", data)
 	}
 	first := data[0].(map[string]any)
-	if first["id"] != "claude-haiku-4-5" || first["display_name"] != "DeepSeek V4 Flash" || first["type"] != "model" {
+	if first["id"] != "claude-haiku-4-5" || first["display_name"] != "DeepSeek Flash" || first["type"] != "model" {
 		t.Fatalf("model entry = %#v", first)
 	}
 	if modelsOut["first_id"] != "claude-haiku-4-5" || modelsOut["last_id"] != "claude-haiku-4-5" || modelsOut["has_more"] != false {
@@ -410,7 +410,7 @@ func TestForcedModelWarningLoggedOnce(t *testing.T) {
 	defer upstream.Close()
 
 	srv, cfg := newTestServer(t, upstream.URL)
-	cfg.ForceModel = "deepseek-v4-flash-vision-exp"
+	cfg.ForceModel = "deepseek-flash"
 
 	var mu sync.Mutex
 	var warnings []string
@@ -439,10 +439,18 @@ func TestForcedModelWarningLoggedOnce(t *testing.T) {
 		t.Fatalf("warnings = %#v", warnings)
 	}
 
-	// 内置模型（gpt-4o）同样会被 FORCE_MODEL 顶替，也必须留下痕迹。
+	// 内置模型 gpt-4o：测试夹具里 openai 后端配了 key，所以直发 openai 的 gpt-4o，
+	// 既不改名成 FORCE_MODEL，也不告警。
+	send("gpt-4o")
+	if len(warnings) != 1 {
+		t.Fatalf("warnings after usable builtin model = %#v", warnings)
+	}
+
+	// openai 后端没配 key 时，同一个 gpt-4o 回落到 FORCE_MODEL，并留下痕迹。
+	cfg.backends["openai"].apiKey = ""
 	send("gpt-4o")
 	if len(warnings) != 2 {
-		t.Fatalf("warnings after builtin model = %#v", warnings)
+		t.Fatalf("warnings after unusable builtin model = %#v", warnings)
 	}
 
 	// alias 命中的请求不会被 FORCE_MODEL 顶替，不告警。
