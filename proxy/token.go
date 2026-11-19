@@ -39,13 +39,9 @@ type fernet struct {
 }
 
 func newFernet(key string) (*fernet, error) {
-	raw, err := base64.URLEncoding.DecodeString(strings.TrimSpace(key))
+	raw, err := decodeFernetKey(key)
 	if err != nil {
-		// 有些实现会省掉 padding，一并兼容。
-		raw, err = base64.RawURLEncoding.DecodeString(strings.TrimSpace(key))
-		if err != nil {
-			return nil, fmt.Errorf("encryption key is not valid urlsafe base64: %w", err)
-		}
+		return nil, err
 	}
 	if len(raw) != fernetKeySize {
 		return nil, fmt.Errorf("encryption key must decode to %d bytes, got %d", fernetKeySize, len(raw))
@@ -54,6 +50,61 @@ func newFernet(key string) (*fernet, error) {
 		signKey: raw[:16],
 		encKey:  raw[16:],
 	}, nil
+}
+
+// decodeFernetKey 解析 Fernet key 的值，容忍 CS 生成 key 的几种实际写法：
+//   - 值被引号包住（.env 风格 OAUTH_ENCRYPTION_KEY="..."，单双引号都认）
+//   - 标准 base64（+ /）与 urlsafe base64（- _）都接受：两个字母表里
+//     + ↔ -、/ ↔ _ 表示同一个 6 bit 值，解出的 32 字节完全相同
+//   - padding 可省略（Raw 变体）
+//
+// 四种编码都失败时，错误里带第一个非法字符及其偏移（0-based），
+// 而不是只留下一句 "illegal base64 data"。
+func decodeFernetKey(key string) ([]byte, error) {
+	value := trimKeyQuotes(strings.TrimSpace(key))
+	if value == "" {
+		return nil, fmt.Errorf("encryption key is empty")
+	}
+	for _, enc := range []*base64.Encoding{
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+	} {
+		if raw, err := enc.DecodeString(value); err == nil {
+			return raw, nil
+		}
+	}
+	for i := 0; i < len(value); i++ {
+		if !isBase64Byte(value[i]) {
+			return nil, fmt.Errorf("encryption key has invalid character %q at offset %d (length %d); expected base64 or urlsafe base64",
+				value[i], i, len(value))
+		}
+	}
+	return nil, fmt.Errorf("encryption key is not valid base64 (length %d); expected base64 or urlsafe base64", len(value))
+}
+
+// trimKeyQuotes 剥掉值两侧成对的引号，避免 `OAUTH_ENCRYPTION_KEY="..."` 这种
+// .env 写法把引号当成 base64 内容。
+func trimKeyQuotes(value string) string {
+	if len(value) >= 2 {
+		first, last := value[0], value[len(value)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+			return strings.TrimSpace(value[1 : len(value)-1])
+		}
+	}
+	return value
+}
+
+// isBase64Byte 判断字符是否属于标准/urlsafe base64 字母表（含 padding）。
+func isBase64Byte(c byte) bool {
+	switch {
+	case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		return true
+	case c == '+', c == '/', c == '-', c == '_', c == '=':
+		return true
+	}
+	return false
 }
 
 // encrypt 用当前时间和随机 IV 加密。
