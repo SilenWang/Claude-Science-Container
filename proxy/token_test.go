@@ -235,3 +235,132 @@ func TestReadOAuthKeyRejectsMissingVariable(t *testing.T) {
 		t.Fatal("readOAuthKey succeeded without OAUTH_ENCRYPTION_KEY, want error")
 	}
 }
+
+// standardBase64TestKey 返回一个 32 字节的 key，以及它的标准 base64
+// （含 '+' 与 '/'）和 urlsafe base64 两种写法。CS 实际生成的值就是标准
+// base64——用户现场那份以 "a+Lz..." 开头，第 2 个字符即 '+'。
+func standardBase64TestKey(t *testing.T) (raw []byte, std, urlsafe string) {
+	t.Helper()
+	raw = make([]byte, fernetKeySize)
+	for i := range raw {
+		if i < fernetKeySize/2 {
+			raw[i] = 0xfb
+		} else {
+			raw[i] = 0xff
+		}
+	}
+	std = base64.StdEncoding.EncodeToString(raw)
+	urlsafe = base64.URLEncoding.EncodeToString(raw)
+	if !strings.ContainsAny(std, "+/") {
+		t.Fatalf("test key %q must contain '+' or '/'", std)
+	}
+	if strings.ContainsAny(urlsafe, "+/") {
+		t.Fatalf("urlsafe test key %q must not contain '+' or '/'", urlsafe)
+	}
+	return raw, std, urlsafe
+}
+
+// SIL-952 第 6 条：标准 base64、urlsafe、省 padding、带引号、带首尾空格
+// 五种写法都必须解出同一份 32 字节。
+func TestNewFernetAcceptsStandardAndQuotedKeys(t *testing.T) {
+	raw, std, urlsafe := standardBase64TestKey(t)
+
+	cases := map[string]string{
+		"standard":          std,
+		"standard raw":      strings.TrimRight(std, "="),
+		"urlsafe":           urlsafe,
+		"urlsafe raw":       strings.TrimRight(urlsafe, "="),
+		"double quoted":     `"` + std + `"`,
+		"single quoted":     `'` + std + `'`,
+		"surrounding space": "  " + std + "  ",
+	}
+	for name, key := range cases {
+		t.Run(name, func(t *testing.T) {
+			f, err := newFernet(key)
+			if err != nil {
+				t.Fatalf("newFernet(%q): %v", key, err)
+			}
+			if !bytes.Equal(f.signKey, raw[:16]) || !bytes.Equal(f.encKey, raw[16:]) {
+				t.Fatalf("newFernet(%q) decoded different bytes", key)
+			}
+		})
+	}
+
+	// 标准与 urlsafe 只是表示层差异，解出的 Fernet 必须完全一样。
+	stdFernet, err := newFernet(std)
+	if err != nil {
+		t.Fatalf("newFernet(standard): %v", err)
+	}
+	urlFernet, err := newFernet(urlsafe)
+	if err != nil {
+		t.Fatalf("newFernet(urlsafe): %v", err)
+	}
+	if !bytes.Equal(stdFernet.signKey, urlFernet.signKey) || !bytes.Equal(stdFernet.encKey, urlFernet.encKey) {
+		t.Fatal("standard and urlsafe keys decoded to different Fernet keys")
+	}
+}
+
+// 四种编码都解不开时，错误里必须带出第一个非法字符与偏移。
+func TestNewFernetReportsInvalidCharacterOffset(t *testing.T) {
+	_, err := newFernet("abc*def")
+	if err == nil {
+		t.Fatal("newFernet accepted an invalid key")
+	}
+	for _, want := range []string{"'*'", "offset 3"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err.Error(), want)
+		}
+	}
+
+	// 合法 base64 但长度不对：报出实际字节数。
+	short := base64.StdEncoding.EncodeToString(make([]byte, 16))
+	_, err = newFernet(short)
+	if err == nil || !strings.Contains(err.Error(), "must decode to 32 bytes") {
+		t.Fatalf("short key error = %v", err)
+	}
+
+	// 空值（包括成对空引号）必须被拒绝。
+	for _, key := range []string{"", `""`, "   "} {
+		if _, err := newFernet(key); err == nil {
+			t.Errorf("newFernet(%q) succeeded, want error", key)
+		}
+	}
+}
+
+// 复现用户现场：encryption.key 里 OAUTH_ENCRYPTION_KEY 是标准 base64 且带
+// 引号，setup-token 必须成功并打印 verified 行。
+func TestSetupTokenAcceptsStandardBase64KeyFile(t *testing.T) {
+	_, std, _ := standardBase64TestKey(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	csHome := filepath.Join(home, ".claude-science")
+	if err := os.MkdirAll(csHome, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	content := "ANTHROPIC_API_KEY_ENCRYPTION_KEY=" + std + "\n" +
+		"OAUTH_ENCRYPTION_KEY=\"" + std + "\"\n" +
+		"JWT_SIGNING_SECRET=" + std + "\n"
+	if err := os.WriteFile(filepath.Join(csHome, "encryption.key"), []byte(content), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	if err := runSetupToken(&stdout); err != nil {
+		t.Fatalf("runSetupToken with standard base64 key: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "verified: token decrypts") {
+		t.Errorf("stdout missing verification line:\n%s", stdout.String())
+	}
+
+	written, err := os.ReadFile(filepath.Join(csHome, ".oauth-tokens", fakeAccountUUID+".enc"))
+	if err != nil {
+		t.Fatalf("read token: %v", err)
+	}
+	f, err := newFernet(std)
+	if err != nil {
+		t.Fatalf("newFernet: %v", err)
+	}
+	if _, err := f.decrypt(string(written)); err != nil {
+		t.Fatalf("decrypt written token with standard base64 key: %v", err)
+	}
+}
