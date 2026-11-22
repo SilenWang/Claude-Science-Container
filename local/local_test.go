@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -376,5 +377,144 @@ func TestProxyOptionsMapping(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("custom backend not mapped: %+v", opts.Backends)
+	}
+}
+
+func TestResolveClaudeSciencePrefersPATH(t *testing.T) {
+	home := t.TempDir()
+	installed := filepath.Join(home, ".claude-science", "bin", "claude-science")
+	if err := os.MkdirAll(filepath.Dir(installed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installed, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default().Local
+	arena := t.TempDir()
+	onPath := filepath.Join(arena, "claude-science")
+	if err := os.WriteFile(onPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := New(Options{
+		Config:   cfg,
+		HomeDir:  func() (string, error) { return home, nil },
+		LookPath: func(string) (string, error) { return onPath, nil },
+	})
+	got, err := runner.resolveClaudeScience()
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != onPath {
+		t.Fatalf("resolved = %q, want PATH hit %q", got, onPath)
+	}
+}
+
+func TestResolveClaudeScienceFallsBackToInstallerPath(t *testing.T) {
+	home := t.TempDir()
+	installed := filepath.Join(home, ".claude-science", "bin", "claude-science")
+	if err := os.MkdirAll(filepath.Dir(installed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installed, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default().Local // default name "claude-science"
+	runner := New(Options{
+		Config:  cfg,
+		HomeDir: func() (string, error) { return home, nil },
+		LookPath: func(string) (string, error) {
+			return "", exec.ErrNotFound
+		},
+	})
+	got, err := runner.resolveClaudeScience()
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != installed {
+		t.Fatalf("resolved = %q, want %q", got, installed)
+	}
+}
+
+func TestResolveClaudeScienceDoesNotFallBackForCustomName(t *testing.T) {
+	home := t.TempDir()
+	installed := filepath.Join(home, ".claude-science", "bin", "claude-science")
+	if err := os.MkdirAll(filepath.Dir(installed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installed, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default().Local
+	cfg.ClaudeSciencePath = "claude-science-beta"
+	runner := New(Options{
+		Config:  cfg,
+		HomeDir: func() (string, error) { return home, nil },
+		LookPath: func(string) (string, error) {
+			return "", exec.ErrNotFound
+		},
+	})
+	if _, err := runner.resolveClaudeScience(); err == nil {
+		t.Fatal("resolve succeeded for a custom name that is not on PATH")
+	}
+}
+
+func TestResolveClaudeScienceReportsSearchedLocations(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Default().Local
+	runner := New(Options{
+		Config:  cfg,
+		HomeDir: func() (string, error) { return home, nil },
+		LookPath: func(string) (string, error) {
+			return "", exec.ErrNotFound
+		},
+		ClaudeScienceCandidates: func(home string) []string {
+			return []string{filepath.Join(home, ".claude-science", "bin", "claude-science")}
+		},
+	})
+	_, err := runner.resolveClaudeScience()
+	if err == nil {
+		t.Fatal("resolve succeeded with no claude-science anywhere")
+	}
+	msg := err.Error()
+	for _, want := range []string{"not found in PATH or at", filepath.Join(home, ".claude-science", "bin", "claude-science"), "local.claude_science_path"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not mention %q", msg, want)
+		}
+	}
+}
+
+func TestClaudeScienceCandidatesPerPlatform(t *testing.T) {
+	home := "/Users/example"
+	darwin := claudeScienceCandidates(home, "darwin")
+	wantDarwin := []string{
+		"/Users/example/.claude-science/bin/claude-science",
+		"/Users/example/.local/bin/claude-science",
+		"/Applications/Claude Science.app/Contents/Resources/bin/claude-science",
+		"/Users/example/Applications/Claude Science.app/Contents/Resources/bin/claude-science",
+		"/opt/homebrew/bin/claude-science",
+		"/opt/local/bin/claude-science",
+		"/usr/local/bin/claude-science",
+	}
+	if len(darwin) != len(wantDarwin) {
+		t.Fatalf("darwin candidates = %v", darwin)
+	}
+	for i, want := range wantDarwin {
+		if darwin[i] != want {
+			t.Fatalf("darwin candidate %d = %q, want %q", i, darwin[i], want)
+		}
+	}
+
+	linux := claudeScienceCandidates("/root", "linux")
+	if linux[0] != "/root/.claude-science/bin/claude-science" {
+		t.Fatalf("linux candidates = %v", linux)
+	}
+	for _, candidate := range linux {
+		if strings.Contains(candidate, "Claude Science.app") {
+			t.Fatalf("linux candidates include a macOS bundle path: %v", linux)
+		}
 	}
 }

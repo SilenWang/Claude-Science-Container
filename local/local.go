@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,13 +58,16 @@ type Options struct {
 	AutoOpenBrowser bool
 	Reporter        Reporter
 
-	NewCommand  func(ctx context.Context, name string, args ...string) *exec.Cmd
-	StartProxy  func(ctx context.Context, opts proxy.Options, version string, stderr io.Writer) error
-	SetupToken  func(w io.Writer) error
-	HomeDir     func() (string, error)
-	LookPath    func(string) (string, error)
-	OpenBrowser func(string) error
-	WaitProxy   func(ctx context.Context, addr string, timeout time.Duration) error
+	NewCommand func(ctx context.Context, name string, args ...string) *exec.Cmd
+	StartProxy func(ctx context.Context, opts proxy.Options, version string, stderr io.Writer) error
+	SetupToken func(w io.Writer) error
+	HomeDir    func() (string, error)
+	LookPath   func(string) (string, error)
+	// ClaudeScienceCandidates overrides the well-known install locations
+	// searched when the bare name is not on PATH. Nil uses the platform list.
+	ClaudeScienceCandidates func(home string) []string
+	OpenBrowser             func(string) error
+	WaitProxy               func(ctx context.Context, addr string, timeout time.Duration) error
 
 	KeyWait   time.Duration
 	ProxyWait time.Duration
@@ -94,6 +98,11 @@ func (o Options) withDefaults() Options {
 	}
 	if o.LookPath == nil {
 		o.LookPath = exec.LookPath
+	}
+	if o.ClaudeScienceCandidates == nil {
+		o.ClaudeScienceCandidates = func(home string) []string {
+			return claudeScienceCandidates(home, runtime.GOOS)
+		}
 	}
 	if o.OpenBrowser == nil {
 		o.OpenBrowser = forward.OpenInBrowser
@@ -371,7 +380,7 @@ func (r *Runner) createEncryptionKey(keyPath string) error {
 func (r *Runner) resolveClaudeScience() (string, error) {
 	path := strings.TrimSpace(r.opts.Config.ClaudeSciencePath)
 	if path == "" {
-		path = "claude-science"
+		path = defaultClaudeScienceName
 	}
 	if strings.ContainsRune(path, os.PathSeparator) {
 		info, err := os.Stat(path)
@@ -384,10 +393,73 @@ func (r *Runner) resolveClaudeScience() (string, error) {
 		return path, nil
 	}
 	resolved, err := r.opts.LookPath(path)
-	if err != nil {
+	if err == nil {
+		return resolved, nil
+	}
+	if path != defaultClaudeScienceName {
 		return "", fmt.Errorf("claude-science binary %q not found in PATH: %w", path, err)
 	}
-	return resolved, nil
+	// A GUI app launched from Finder/Dock inherits launchd's minimal PATH
+	// (/usr/bin:/bin:/usr/sbin:/sbin), so the shell's claude-science is often
+	// invisible. Check the installer's own locations before giving up.
+	found, candidates := r.findInstalledClaudeScience()
+	if found != "" {
+		return found, nil
+	}
+	return "", fmt.Errorf("claude-science binary %q not found in PATH or at %s (set local.claude_science_path): %w",
+		path, strings.Join(candidates, ", "), err)
+}
+
+// defaultClaudeScienceName is the bare binary name looked up on PATH.
+const defaultClaudeScienceName = "claude-science"
+
+// claudeScienceCandidates lists well-known install locations for the
+// claude-science CLI, in priority order. The official installer puts it under
+// ~/.claude-science/bin, and the macOS app bundle ships its own copy.
+func claudeScienceCandidates(home, goos string) []string {
+	var paths []string
+	if home != "" {
+		paths = append(paths,
+			filepath.Join(home, ".claude-science", "bin", "claude-science"),
+			filepath.Join(home, ".local", "bin", "claude-science"),
+		)
+	}
+	if goos == "darwin" {
+		paths = append(paths, "/Applications/Claude Science.app/Contents/Resources/bin/claude-science")
+		if home != "" {
+			paths = append(paths,
+				filepath.Join(home, "Applications", "Claude Science.app", "Contents", "Resources", "bin", "claude-science"))
+		}
+		paths = append(paths,
+			"/opt/homebrew/bin/claude-science",
+			"/opt/local/bin/claude-science",
+			"/usr/local/bin/claude-science",
+		)
+	} else {
+		paths = append(paths,
+			"/usr/local/bin/claude-science",
+			"/opt/claude-science/bin/claude-science",
+		)
+	}
+	return paths
+}
+
+// findInstalledClaudeScience returns the first executable candidate, plus the
+// full list so the caller can name what it checked.
+func (r *Runner) findInstalledClaudeScience() (string, []string) {
+	home, err := r.opts.HomeDir()
+	if err != nil {
+		home = ""
+	}
+	candidates := r.opts.ClaudeScienceCandidates(home)
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+			continue
+		}
+		return candidate, candidates
+	}
+	return "", candidates
 }
 
 func (r *Runner) scanOutput(reader io.Reader, urlCh chan<- string, once *sync.Once) {

@@ -274,7 +274,7 @@ Example:
 | `model_list_mode` | `/v1/models` layout: `aliases`, `builtin`, `aliases_first` (empty = auto) | — |
 | `inline_image_policy` | `omit_inline`, `omit`, `preserve` or `auto` | `omit_inline` |
 | `proxy_host` / `proxy_port` | Where the in-process bridge listens | `127.0.0.1` / `9876` |
-| `claude_science_path` | `claude-science` binary (name on `PATH` or absolute path) | `claude-science` |
+| `claude_science_path` | `claude-science` binary (name on `PATH`, absolute path, or empty for auto-detect) | `claude-science` |
 | `claude_science_port` | Port for `claude-science serve` | `9981` |
 | `open_browser` | Open the login URL automatically | `true` |
 | `backends.<name>` | `{api_key, base_url, upstream_mode, model_pattern}` for `deepseek`, `openai`, `custom` | provider defaults |
@@ -302,6 +302,8 @@ echo "$CUSTOM_API_KEY" | ./claude-science-container local --set-key - --backend 
 ```
 
 `forward` keeps the historical behavior: it runs the remote command once, prints and (unless `--no-browser`) opens the login URL, keeps the port forwards alive, pings every 10 s and reconnects 3 s after a drop. `local` needs `claude-science` available through `PATH` or `local.claude_science_path`, and launches it with `ANTHROPIC_BASE_URL=http://127.0.0.1:<proxy_port>`.
+
+When `claude_science_path` is empty or the bare name `claude-science`, a failed `PATH` lookup falls back to the installer's well-known locations — `~/.claude-science/bin/claude-science`, `~/.local/bin/claude-science`, and on macOS `/Applications/Claude Science.app/Contents/Resources/bin/claude-science`, `~/Applications/Claude Science.app/Contents/Resources/bin/claude-science`, `/opt/homebrew/bin`, `/opt/local/bin`, `/usr/local/bin`. This matters for the GUI: an app started from Finder/Dock inherits launchd's minimal `PATH`, so a binary that works in your shell is often invisible to the window. Set `local.claude_science_path` to an absolute path to skip the search.
 
 ### Manual Usage (without the binary)
 
