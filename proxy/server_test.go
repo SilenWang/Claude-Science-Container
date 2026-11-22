@@ -281,6 +281,27 @@ func TestAliasRoutesToConfiguredBackend(t *testing.T) {
 	}
 }
 
+// TestUpstreamUnauthorizedIsReportedAsBadGateway 覆盖第三方后端拒绝 API key
+// 的情况：CS 会把模型调用上的任何 401 说成“Claude session 失效”，所以桥必须
+// 改成 502 并保留后端原文，否则用户会去重新登录一个根本没坏的东西。
+func TestUpstreamUnauthorizedIsReportedAsBadGateway(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":{"message":"Invalid API key"}}`)
+	}))
+	defer upstream.Close()
+
+	srv, _ := newTestServer(t, upstream.URL)
+	rec := doRequest(t, srv, http.MethodPost, "/v1/messages", `{"model":"claude-sonnet-4-5","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "upstream 401") || !strings.Contains(body, "Invalid API key") {
+		t.Fatalf("body = %s", body)
+	}
+}
+
 func TestNonV1PathFallsBackToCatchAll(t *testing.T) {
 	// 上游行为：任何路径都会被归一化成 /v1/*，由兜底返回 {"ok":true}。
 	srv, _ := newTestServer(t, "http://127.0.0.1:1")

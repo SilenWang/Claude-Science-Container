@@ -75,6 +75,22 @@ I am not a professional software developer, so the reasons for some of the featu
 - **Built-in model IDs fall back to `FORCE_MODEL`**: A built-in ID such as `gpt-4o` is sent to its own backend when that backend has an API key, and otherwise to `DEFAULT_BACKEND` + `FORCE_MODEL`, with one warning per `requested -> forced` pair. This is intentional — the model menu must stay clickable. See [Model mapping](#model-mapping-and-v1models).
 - **Tasks terminate unexpectedly**: Tasks running on DeepSeek Flash sometimes terminate unexpectedly mid-execution, whereas DeepSeek Pro experiences this issue far less often.
 
+## Troubleshooting
+
+### "Agent Failed: Your Claude session is no longer valid"
+
+Claude Science prints that sign-out message for **any** 401 it sees on a model call, which hides two very different causes:
+
+1. **Claude Science was not started by this tool.** The fake OAuth token only works while requests go to the bridge, and Claude Science finds the bridge through `ANTHROPIC_BASE_URL` at start-up. A `claude-science serve` you launched yourself has no such variable, so it calls `api.anthropic.com` with a fake bearer and gets a 401. Start it through `local` / the GUI's local tab, or export the variable yourself before starting it:
+   ```bash
+   export ANTHROPIC_BASE_URL=http://127.0.0.1:9876   # the bridge address from config.json
+   claude-science serve --no-browser
+   ```
+   On macOS, a Claude Science process started before the bridge is gone keeps the old environment; stop it (`claude-science stop`) and start it again from the shell that exports the variable.
+2. **The third-party backend rejected its API key.** The bridge logs `[bridge] stream upstream returned 401: ...` and now answers 502 instead of relaying the 401, so the UI shows the backend's own message (`backend rejected the API key (upstream 401): ...`) instead of a bogus sign-out prompt. Fix the key (`local --set-key <KEY> --backend <name>`, `config.json`, or the container's `.env`) and retry.
+
+If neither applies, check the logs: `claude-science logs --tail 100` for the UI side and the GUI's local tab (or `docker compose logs claude-science`) for the `[bridge]` lines.
+
 ## Prerequisites
 
 ## Quick Start

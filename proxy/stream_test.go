@@ -357,6 +357,27 @@ func TestStreamFailsBeforeFirstEvent(t *testing.T) {
 		}
 	})
 
+	t.Run("upstream 401 becomes bad gateway", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"error":{"message":"Incorrect API key provided"}}`)
+		}))
+		defer upstream.Close()
+
+		srv, _ := newTestServer(t, upstream.URL)
+		rec := doRequest(t, srv, http.MethodPost, "/v1/messages", `{
+			"model":"claude-sonnet-4-5","max_tokens":64,"stream":true,
+			"messages":[{"role":"user","content":"hi"}]
+		}`)
+		if rec.Code != http.StatusBadGateway {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "upstream 401") || !strings.Contains(body, "Incorrect API key provided") {
+			t.Fatalf("body = %s", body)
+		}
+	})
+
 	t.Run("empty upstream stream", func(t *testing.T) {
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
