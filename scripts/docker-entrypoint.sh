@@ -2,6 +2,7 @@
 set -euo pipefail
 
 CS_BIN="/usr/local/bin/claude-science"
+CS_CLI="/usr/local/bin/claude-science-container"
 CS_HOME="${HOME}/.claude-science"
 ENC_KEY="${CS_HOME}/encryption.key"
 
@@ -37,7 +38,7 @@ setup_oauth() {
 
     if [ -f "$ENC_KEY" ]; then
         echo "Generating OAuth token..."
-        /opt/api-bridge/api-bridge setup-token 2>&1 || true
+        "$CS_CLI" setup-token 2>&1 || true
     fi
 }
 

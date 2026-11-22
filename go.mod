@@ -1,4 +1,4 @@
-module github.com/SilenWang/Claude-Science-Container/helper
+module github.com/SilenWang/Claude-Science-Container
 
 go 1.26
 

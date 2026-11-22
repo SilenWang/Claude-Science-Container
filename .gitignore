@@ -2,9 +2,9 @@
 __pycache__/
 *.pyc
 .pixi/
-helper/launcher*
-helper/config.json
-*.syso
+/config.json
+/claude-science-container
+/dist/
 data
 proxy/api-bridge
 proxy/*.test

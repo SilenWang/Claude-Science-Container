@@ -23,27 +23,31 @@ Run [Claude Science](https://claude.ai/science) Linux edition with a third-party
 ```
 
 - **claude-science** — The official Claude Science Linux binary, configured to route API calls through the internal API bridge.
-- **API Bridge** — Translates Anthropic-style API calls from Claude Science to OpenAI-compatible third-party endpoints (DeepSeek, SiliconFlow, Moonshot, etc.). Implemented in Go under `proxy/` (standard library only); its route and translation conventions follow [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
+- **claude-science-container** — The project's single Go binary. It contains the API bridge (`serve`), the OAuth token writer (`setup-token`), the remote SSH launcher (`forward`) and the local all-in-one mode (`local`). The bridge source lives under `proxy/`; its route and translation conventions follow [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
 
-## API Bridge (Go)
+## Build (single binary)
 
-The bridge lives in `proxy/` and uses only the Go standard library. The Docker image compiles it in a `golang:1.26` build stage and copies a single static binary into the runtime layer: nothing is cloned from the upstream Python project, no patches are applied, and no venv/pip dependencies exist in the image. Build and test it through pixi:
+Everything compiles into one binary through pixi-managed Go:
 
 ```bash
-pixi run build_bridge   # builds proxy/api-bridge
-pixi run test_bridge    # go test ./...
+pixi run build        # host binary: ./claude-science-container
+pixi run build_all    # cross-compiled release binaries in dist/
+pixi run test         # go test ./...
+pixi run vet          # go vet ./...
 ```
 
-Configuration comes entirely from environment variables (`.env`).
+The Docker image compiles the same source in a `golang:1.26` build stage and copies one static binary into the runtime layer: nothing is cloned from the upstream Python project, no patches are applied, and no venv/pip dependencies exist in the image.
 
-`api-bridge setup-token` replaces the upstream `setup-token.py`. It reads `OAUTH_ENCRYPTION_KEY=` from `~/.claude-science/encryption.key`, encrypts a fake OAuth token with Fernet (AES-128-CBC + HMAC-SHA256, standard library only), and writes `~/.claude-science/.oauth-tokens/byok-user-000000000000000000.enc` (directory `0700`, file `0600`). It then reads the file back, decrypts it to verify, and prints `verified: token decrypts`.
+The container keeps using environment variables (`.env` → docker-compose → `serve`). The desktop commands (`forward` / `local`) use a single `config.json` next to the executable; `.env` is only a compatibility fallback for container runs.
+
+`setup-token` replaces the upstream `setup-token.py`. It reads `OAUTH_ENCRYPTION_KEY=` from `~/.claude-science/encryption.key`, encrypts a fake OAuth token with Fernet (AES-128-CBC + HMAC-SHA256), and writes `~/.claude-science/.oauth-tokens/byok-user-000000000000000000.enc` (directory `0700`, file `0600`). It then reads the file back, decrypts it to verify, and prints `verified: token decrypts`.
 
 ## Current Status
 
 The container successfully runs both claude-science and the API bridge. Key accomplishments:
 
 - **API routing works** — Claude Science routes Anthropic-style API calls through the bridge, which translates them to OpenAI-compatible third-party endpoints. Models are callable via the web UI.
-- **Environment-based configuration** — All API keys and backend options are read directly from environment variables by the Go bridge at startup; there is no `config.json` to rewrite.
+- **Environment-based configuration in the container** — Inside the image, `serve` still reads all API keys and backend options directly from environment variables at startup. On the desktop, the same binary reads `config.json` instead (see [CLI](#cli-single-binary)).
 - **OAuth token auto-setup** — On first run, the entrypoint lets claude-science create its encryption key if missing, then the Go bridge writes a Fernet-encrypted fake OAuth token. No upstream Python script is involved.
 - **Multiple backend support** — Custom (SiliconFlow, Moonshot, etc.), DeepSeek, and OpenAI backends are all supported. **The default is the DeepSeek official API** with model `deepseek-flash` (displayed as "DeepSeek Flash"). It is a text-only model, so image blocks are dropped by default (`INLINE_IMAGE_POLICY=omit_inline`) and replaced with a short placeholder note.
 - **Model menu and image input** — `GET /v1/models` serves the alias/built-in model list, and Anthropic image blocks (base64 or URL) are translated to OpenAI `image_url` parts according to `INLINE_IMAGE_POLICY`.
@@ -181,43 +185,120 @@ claude-science keeps GPU passthrough into its sandbox **off** unless `config.tom
 When enabled, the sandbox gets `/dev/nvidia*` and `/sys/module/nvidia*` dev-bound into it. Note that this only applies to **new** sessions — sessions created before GPU was enabled keep their previous `gpu_mode`. CUDA/torch are not preinstalled in the sandbox's default Python env; install them as needed.
 
 
-## Startup Assistant (helper)
+## CLI (single binary)
 
-A Go-based SSH launcher tool that connects to a remote server running the container, sets up port forwarding, automatically retrieves the login URL, and opens the browser.
+`claude-science-container` is both the container's bridge and a desktop tool:
 
-### Quick Start
+| Command | What it does |
+|---------|--------------|
+| `forward` | SSH-forward a remote Claude Science, fetch its login URL, optionally open the browser |
+| `local` | Write the fake OAuth token, start the proxy in-process, launch a local `claude-science serve` against it, print the login URL |
+| `serve` | Run only the API bridge from environment variables (container / supervisord) |
+| `setup-token` | Write the fake OAuth token from `~/.claude-science/encryption.key` |
+| `config path\|show\|init` | Inspect or create the shared `config.json` |
+| `version` | Print the version |
 
-```bash
-# Build (requires Go or use pixi)
-pixi run build
-# or: cd helper && CGO_ENABLED=0 go build -o launcher .
+Run `claude-science-container <command> --help` for each command's flags.
 
-# Configure
-cp helper/config.example.json helper/config.json
-# Edit config.json with your SSH server details
+### config.json: location and first run
 
-# Run
-./helper/launcher
+- The file is **next to the executable**: `<dir-of-binary>/config.json`. `CSC_CONFIG=/path/to/config.json` overrides it, and `config path` prints the resolved path.
+- On the first `forward`, `local`, `config show` or bare invocation the file is created automatically with every default filled in, and the path plus next steps are printed.
+- It contains API keys, so it is written with mode `0600`.
+- Legacy helper files remain readable: both a single-target object and `{"targets":[...]}` are accepted. The canonical shape is `{"forward": {...}, "local": {...}}`.
+- `.env` is only read by the container's `serve`. `local` additionally falls back to `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` / `CUSTOM_API_KEY` (and the matching `*_BASE_URL`) when the config value is empty.
+
+Example:
+
+```json
+{
+  "forward": {
+    "targets": [
+      {
+        "name": "prod",
+        "ssh_host": "192.168.1.100",
+        "ssh_port": 22,
+        "ssh_user": "root",
+        "ssh_key": "/home/me/.ssh/id_ed25519",
+        "container_id": "claude-science",
+        "command": "claude-science url",
+        "port_forwards": [
+          {"local": 9876, "remote": 9876},
+          {"local": 9981, "remote": 9981}
+        ]
+      }
+    ]
+  },
+  "local": {
+    "default_backend": "deepseek",
+    "force_model": "deepseek-flash",
+    "model_aliases": [],
+    "model_list_mode": "aliases",
+    "inline_image_policy": "omit_inline",
+    "proxy_host": "127.0.0.1",
+    "proxy_port": 9876,
+    "claude_science_path": "claude-science",
+    "claude_science_port": 9981,
+    "open_browser": true,
+    "backends": {
+      "deepseek": {"api_key": "", "base_url": "https://api.deepseek.com/v1", "upstream_mode": "openai", "model_pattern": ""},
+      "openai": {"api_key": "", "base_url": "https://api.openai.com/v1", "upstream_mode": "openai"},
+      "custom": {"api_key": "", "base_url": "", "upstream_mode": "openai"}
+    }
+  }
+}
 ```
 
-### Configuration
+`forward.targets[]` fields:
 
 | Field | Description |
 |-------|-------------|
+| `name` | Target label used by `forward --target` |
 | `ssh_host` | Remote server hostname/IP |
 | `ssh_port` | SSH port (default: 22) |
 | `ssh_user` | SSH user (default: root) |
 | `ssh_key` | Path to SSH private key |
-| `container_id` | Docker container name/ID (default: claude-science) |
-| `port_forwards` | List of `{local, remote}` port mappings |
+| `container_id` | Docker container name/ID; when set, `command` runs through `docker exec` |
+| `command` | Remote command that prints the login URL (default: `claude-science url`) |
+| `port_forwards` | List of `{local, remote}` mappings (default: 9876 and 9981) |
 
-The launcher automatically:
-- Connects via SSH and sets up port forwarding (default: 9876, 9981)
-- Fetches the Claude Science login URL from the container
-- Opens the URL in your default browser
-- Reconnects automatically on connection loss
+`local` fields:
 
-### Manual Usage (without helper)
+| Field | Description | Default |
+|-------|-------------|---------|
+| `default_backend` | `deepseek`, `openai` or `custom` | `deepseek` |
+| `force_model` | Model for requests without an alias/pattern match | `deepseek-flash` |
+| `model_aliases` | Array of `{id, display_name, backend, model}` (same shape as `MODEL_ALIASES`) | `[]` |
+| `model_list_mode` | `/v1/models` layout: `aliases`, `builtin`, `aliases_first` (empty = auto) | — |
+| `inline_image_policy` | `omit_inline`, `omit`, `preserve` or `auto` | `omit_inline` |
+| `proxy_host` / `proxy_port` | Where the in-process bridge listens | `127.0.0.1` / `9876` |
+| `claude_science_path` | `claude-science` binary (name on `PATH` or absolute path) | `claude-science` |
+| `claude_science_port` | Port for `claude-science serve` | `9981` |
+| `open_browser` | Open the login URL automatically | `true` |
+| `backends.<name>` | `{api_key, base_url, upstream_mode, model_pattern}` for `deepseek`, `openai`, `custom` | provider defaults |
+
+Usage:
+
+```bash
+# first run: creates config.json and prints the path and next steps
+./claude-science-container
+
+# remote mode: fill in forward.targets[].ssh_host / ssh_key first
+./claude-science-container forward
+./claude-science-container forward --target prod --no-browser
+
+# local mode: store a key, then run
+./claude-science-container local --set-key sk-xxx --backend deepseek
+./claude-science-container local
+echo "$CUSTOM_API_KEY" | ./claude-science-container local --set-key - --backend custom
+
+# inspect the effective config
+./claude-science-container config show
+```
+
+`forward` keeps the historical behavior: it runs the remote command once, prints and (unless `--no-browser`) opens the login URL, keeps the port forwards alive, pings every 10 s and reconnects 3 s after a drop. `local` needs `claude-science` available through `PATH` or `local.claude_science_path`, and launches it with `ANTHROPIC_BASE_URL=http://127.0.0.1:<proxy_port>`.
+
+### Manual Usage (without the binary)
 
 If connecting via SSH directly:
 
@@ -227,9 +308,9 @@ ssh -L 9876:127.0.0.1:9876 -L 9981:127.0.0.1:9981 user@your-server
 docker exec claude-science claude-science url
 ```
 
-## Configuration
+## Configuration (container environment variables)
 
-All configuration is done via environment variables in `.env`:
+For the container, all configuration is done via environment variables in `.env` and read by `serve`:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -411,7 +492,7 @@ When every image in a user message is dropped, the bridge appends a short placeh
 
 ## Acknowledgements
 
-This project's API bridge (`proxy/`) started from the route and translation conventions of [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208), and is now an independent Go implementation that uses only the standard library.
+This project's API bridge (`proxy/`) started from the route and translation conventions of [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208), and is now an independent Go implementation whose translation/routing logic uses only the standard library (SSH forwarding uses `golang.org/x/crypto/ssh`).
 
 ## License
 

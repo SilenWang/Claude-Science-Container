@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"bytes"
@@ -55,7 +55,7 @@ func newFernet(key string) (*fernet, error) {
 // decodeFernetKey 解析 Fernet key 的值，容忍 CS 生成 key 的几种实际写法：
 //   - 值被引号包住（.env 风格 OAUTH_ENCRYPTION_KEY="..."，单双引号都认）
 //   - 标准 base64（+ /）与 urlsafe base64（- _）都接受：两个字母表里
-//     + ↔ -、/ ↔ _ 表示同一个 6 bit 值，解出的 32 字节完全相同
+//   - ↔ -、/ ↔ _ 表示同一个 6 bit 值，解出的 32 字节完全相同
 //   - padding 可省略（Raw 变体）
 //
 // 四种编码都失败时，错误里带第一个非法字符及其偏移（0-based），
