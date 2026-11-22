@@ -173,6 +173,17 @@ func (r *Runner) Start(parent context.Context) error {
 		return err
 	}
 
+	// `claude-science serve` attaches to a daemon that is already running
+	// instead of starting a fresh one, and that daemon keeps the environment it
+	// was started with. A daemon left behind by a manual start (or by the
+	// container) has no ANTHROPIC_BASE_URL, so its requests bypass the bridge
+	// and Claude Science reports "Your Claude session is no longer valid".
+	// Stop it so the daemon we start below picks up the bridge address.
+	r.report(PhasePreparing, "stopping any claude-science daemon left running", "")
+	if err := r.stopDaemon(ctx); err != nil {
+		fmt.Fprintf(r.opts.Stderr, "warning: %v\n", err)
+	}
+
 	addr := ProxyAddress(r.opts.Config)
 	proxyErr := make(chan error, 1)
 	r.report(PhaseProxy, "starting local API bridge on "+addr, "")
@@ -315,6 +326,20 @@ func (r *Runner) prepare() error {
 	r.report(PhaseCredentials, "writing fake OAuth token", "")
 	if err := r.opts.SetupToken(r.opts.Stdout); err != nil {
 		return fmt.Errorf("writing fake OAuth token: %w", err)
+	}
+	return nil
+}
+
+// stopDaemon stops a claude-science daemon left over from an earlier start. Its
+// output is discarded: "nothing to stop" is the common case and not an error.
+func (r *Runner) stopDaemon(ctx context.Context) error {
+	stopCtx, cancel := context.WithTimeout(ctx, r.opts.StopWait)
+	defer cancel()
+	cmd := r.opts.NewCommand(stopCtx, r.csPath, "stop")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("stopping the claude-science daemon that was already running: %w (run `%s stop` and retry)", err, r.csPath)
 	}
 	return nil
 }
