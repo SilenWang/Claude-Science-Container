@@ -18,6 +18,7 @@ import (
 
 	"github.com/SilenWang/Claude-Science-Container/config"
 	"github.com/SilenWang/Claude-Science-Container/forward"
+	"github.com/SilenWang/Claude-Science-Container/gui"
 	"github.com/SilenWang/Claude-Science-Container/local"
 	"github.com/SilenWang/Claude-Science-Container/proxy"
 )
@@ -29,12 +30,16 @@ const binaryName = "claude-science-container"
 
 func main() {
 	if len(os.Args) < 2 {
-		runBare()
+		runGUI()
 		return
 	}
 
 	args := os.Args[2:]
 	switch os.Args[1] {
+	case "gui":
+		runGUI()
+	case "--cli":
+		runBare()
 	case "forward":
 		runForward(args)
 	case "local":
@@ -62,12 +67,27 @@ func main() {
 	}
 }
 
+func runGUI() {
+	path, err := config.DefaultPath()
+	if err != nil {
+		fatalf("locating config: %v", err)
+	}
+	if err := gui.Run(path); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: starting the GUI: %v\n", binaryName, err)
+		fmt.Fprintf(os.Stderr, "Use `%s --cli` for the terminal launcher, or `%s <command> --help` for the CLI.\n", binaryName, binaryName)
+		os.Exit(1)
+	}
+}
+
 func usage(w *os.File) {
 	fmt.Fprintf(w, `Claude Science Container — single CLI for the container, remote forwarding and local mode.
 
-usage: %s <command> [flags]
+usage: %s [command] [flags]
+
+with no command, the desktop window opens; --cli prints the terminal launcher instead.
 
 commands:
+  gui       open the desktop window (the default)
   forward   SSH-forward a remote Claude Science and print its login URL
   local     run the Anthropic→OpenAI proxy and a local claude-science against it
   config    path | show | init — inspect or create the shared config.json

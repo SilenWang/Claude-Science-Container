@@ -246,7 +246,7 @@ func applyTargetDefaults(t *Target) {
 	if t.Command == "" {
 		t.Command = defaultCommand
 	}
-	if len(t.PortForwards) == 0 {
+	if t.PortForwards == nil {
 		t.PortForwards = []PortForward{
 			{Local: 9876, Remote: 9876},
 			{Local: 9981, Remote: 9981},
