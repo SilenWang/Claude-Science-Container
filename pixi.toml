@@ -1,16 +1,16 @@
 [workspace]
-name = "claude-science-container"
+name = "csh"
 version = "0.1.0"
 channels = ["conda-forge", "bioconda"]
 platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
 
 # 单一构建产物：proxy 桥 + forward/local CLI 在同一个二进制里。
 [tasks.build]
-cmd = "go build -trimpath -ldflags=\"-s -w\" -o claude-science-container ."
+cmd = "go build -trimpath -ldflags=\"-s -w\" -o csh ."
 
-# 交叉编译发布包（dist/claude-science-container-<os>-<arch>）。
+# 交叉编译发布包（dist/csh-<os>-<arch>）。
 [tasks.build_all]
-cmd = "sh -c 'set -e; mkdir -p dist; for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do os=${pair%/*}; arch=${pair#*/}; out=dist/claude-science-container-$os-$arch; if [ \"$os\" = windows ]; then out=$out.exe; fi; GOOS=$os GOARCH=$arch go build -trimpath -ldflags=\"-s -w\" -o \"$out\" .; done'"
+cmd = "sh -c 'set -e; mkdir -p dist; for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do os=${pair%/*}; arch=${pair#*/}; out=dist/csh-$os-$arch; if [ \"$os\" = windows ]; then out=$out.exe; fi; GOOS=$os GOARCH=$arch go build -trimpath -ldflags=\"-s -w\" -o \"$out\" .; done'"
 
 [tasks.test]
 cmd = "go test ./..."
@@ -29,7 +29,7 @@ cmd = "go vet ./..."
 cmd = "go test ./proxy/..."
 
 [tasks.clean]
-cmd = "rm -rf dist claude-science-container"
+cmd = "rm -rf dist csh claude-science-container"
 
 [tasks.build_image]
 cmd = "docker compose build --build-arg CACHE_BUST=$(date +%s)"

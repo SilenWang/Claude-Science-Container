@@ -23,14 +23,14 @@ Run [Claude Science](https://claude.ai/science) Linux edition with a third-party
 ```
 
 - **claude-science** — The official Claude Science Linux binary, configured to route API calls through the internal API bridge.
-- **claude-science-container** — The project's single Go binary. It contains the API bridge (`serve`), the OAuth token writer (`setup-token`), the remote SSH launcher (`forward`), the local all-in-one mode (`local`) and a desktop window with both modes as tabs (`gui`). The bridge source lives under `proxy/`; its route and translation conventions follow [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
+- **csh** (`claude-science-helper`) — The project's single Go binary, named `csh`. It contains the API bridge (`serve`), the OAuth token writer (`setup-token`), the remote SSH launcher (`forward`), the local all-in-one mode (`local`) and a desktop window with both modes as tabs (`gui`). The bridge source lives under `proxy/`; its route and translation conventions follow [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
 
 ## Build (single binary)
 
 Everything compiles into one binary through pixi-managed Go:
 
 ```bash
-pixi run build        # host binary: ./claude-science-container
+pixi run build        # host binary: ./csh
 pixi run build_all    # cross-compiled release binaries in dist/
 pixi run test         # go test ./... (CLI, config, proxy and GUI view tests)
 pixi run vet          # go vet ./...
@@ -188,7 +188,7 @@ When enabled, the sandbox gets `/dev/nvidia*` and `/sys/module/nvidia*` dev-boun
 
 ## CLI (single binary)
 
-`claude-science-container` is both the container's bridge and a desktop tool:
+`csh` (`claude-science-helper`) is both the container's bridge and a desktop tool:
 
 | Command | What it does |
 |---------|--------------|
@@ -200,11 +200,11 @@ When enabled, the sandbox gets `/dev/nvidia*` and `/sys/module/nvidia*` dev-boun
 | `config path\|show\|init` | Inspect or create the shared `config.json` |
 | `version` | Print the version |
 
-Run `claude-science-container <command> --help` for each command's flags.
+Run `csh <command> --help` for each command's flags. The container image installs it as `/usr/local/bin/csh` and keeps a `claude-science-container` symlink for older scripts.
 
 ### config.json: location and first run
 
-- The file is **next to the executable**: `<dir-of-binary>/config.json`. `CSC_CONFIG=/path/to/config.json` overrides it, and `config path` prints the resolved path.
+- The file is **next to the executable**: `<dir-of-binary>/config.json`. `CSC_CONFIG=/path/to/config.json` overrides it (the `CSC_` prefix is kept for compatibility), and `config path` prints the resolved path.
 - On the first `forward`, `local`, `config show`, GUI launch or `--cli` invocation the file is created automatically with every default filled in.
 - It contains API keys, so it is written with mode `0600`.
 - Legacy helper files remain readable: both a single-target object and `{"targets":[...]}` are accepted. The canonical shape is `{"forward": {...}, "local": {...}}`.
@@ -283,22 +283,22 @@ Usage:
 
 ```bash
 # first run, terminal: creates config.json and prints the path and next steps
-./claude-science-container --cli
+./csh --cli
 
 # desktop window (the default when the binary is started without a command)
-./claude-science-container
+./csh
 
 # remote mode: fill in forward.targets[].ssh_host / ssh_key first
-./claude-science-container forward
-./claude-science-container forward --target prod --no-browser
+./csh forward
+./csh forward --target prod --no-browser
 
 # local mode: store a key, then run
-./claude-science-container local --set-key sk-xxx --backend deepseek
-./claude-science-container local
-echo "$CUSTOM_API_KEY" | ./claude-science-container local --set-key - --backend custom
+./csh local --set-key sk-xxx --backend deepseek
+./csh local
+echo "$CUSTOM_API_KEY" | ./csh local --set-key - --backend custom
 
 # inspect the effective config
-./claude-science-container config show
+./csh config show
 ```
 
 `forward` keeps the historical behavior: it runs the remote command once, prints and (unless `--no-browser`) opens the login URL, keeps the port forwards alive, pings every 10 s and reconnects 3 s after a drop. `local` needs `claude-science` available through `PATH` or `local.claude_science_path`, and launches it with `ANTHROPIC_BASE_URL=http://127.0.0.1:<proxy_port>`.

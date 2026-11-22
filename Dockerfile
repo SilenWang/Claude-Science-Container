@@ -11,7 +11,7 @@ COPY forward/ ./forward/
 COPY gui/ ./gui/
 COPY local/ ./local/
 COPY proxy/ ./proxy/
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/claude-science-container .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/csh .
 
 FROM ubuntu:24.04
 
@@ -40,8 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt
 
 # 一个静态二进制同时提供 serve / setup-token（容器链路）与 forward / local（桌面）。
-COPY --from=build /out/claude-science-container /usr/local/bin/claude-science-container
-RUN chmod 755 /usr/local/bin/claude-science-container
+COPY --from=build /out/csh /usr/local/bin/csh
+RUN chmod 755 /usr/local/bin/csh && ln -sf /usr/local/bin/csh /usr/local/bin/claude-science-container
 
 ARG CACHE_BUST
 
