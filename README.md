@@ -86,7 +86,7 @@ Claude Science prints that sign-out message for **any** 401 it sees on a model c
    export ANTHROPIC_BASE_URL=http://127.0.0.1:9876   # the bridge address from config.json
    claude-science serve --no-browser
    ```
-   On macOS, a Claude Science process started before the bridge is gone keeps the old environment; stop it (`claude-science stop`) and start it again from the shell that exports the variable.
+   On macOS, a Claude Science process started before the bridge is gone keeps the old environment; stop it (`claude-science stop`) and start it again from the shell that exports the variable. `local` and the GUI's local tab now stop any daemon left running before they start their own, because `claude-science serve` attaches to an existing daemon and would otherwise keep an environment without the bridge address.
 2. **The third-party backend rejected its API key.** The bridge logs `[bridge] stream upstream returned 401: ...` and now answers 502 instead of relaying the 401, so the UI shows the backend's own message (`backend rejected the API key (upstream 401): ...`) instead of a bogus sign-out prompt. Fix the key (`local --set-key <KEY> --backend <name>`, `config.json`, or the container's `.env`) and retry.
 
 If neither applies, check the logs: `claude-science logs --tail 100` for the UI side and the GUI's local tab (or `docker compose logs claude-science`) for the `[bridge]` lines.
