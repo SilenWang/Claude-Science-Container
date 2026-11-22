@@ -434,8 +434,7 @@ func (s *server) handleMessagesStream(w http.ResponseWriter, r *http.Request, re
 	if httpResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseBody))
 		s.logf("[bridge] stream upstream returned %d: %s", httpResp.StatusCode, snippet(body))
-		writeAPIError(w, httpResp.StatusCode, "api_error",
-			fmt.Sprintf("backend returned %d: %s", httpResp.StatusCode, snippet(body)))
+		writeUpstreamError(w, httpResp.StatusCode, snippet(body))
 		return
 	}
 

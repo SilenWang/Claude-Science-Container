@@ -175,6 +175,26 @@ func TestRunnerStartsStack(t *testing.T) {
 		t.Fatalf("stdout missing %q:\n%s", wantBase, stdout.String())
 	}
 
+	// A daemon from an earlier start must be stopped first: `serve` would attach
+	// to it and keep its old environment (no ANTHROPIC_BASE_URL).
+	logBytes, err := os.ReadFile(filepath.Join(home, "cs.log"))
+	if err != nil {
+		t.Fatalf("read fake log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+	stopIdx, serveIdx := -1, -1
+	for i, line := range lines {
+		if line == "cs stop" && stopIdx == -1 {
+			stopIdx = i
+		}
+		if strings.HasPrefix(line, "cs serve --no-browser --host") && serveIdx == -1 {
+			serveIdx = i
+		}
+	}
+	if stopIdx == -1 || serveIdx == -1 || stopIdx > serveIdx {
+		t.Fatalf("daemon was not stopped before the new serve: %v", lines)
+	}
+
 	// The fake OAuth token must have been written under the temp HOME.
 	tokenPath := filepath.Join(home, ".claude-science", ".oauth-tokens", "byok-user-000000000000000000.enc")
 	if _, err := os.Stat(tokenPath); err != nil {

@@ -185,7 +185,7 @@ func (s *server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	if status != http.StatusOK {
 		s.logf("[bridge] upstream returned %d: %s", status, snippet(resp))
-		writeAPIError(w, status, "api_error", "backend returned "+fmt.Sprint(status)+": "+snippet(resp))
+		writeUpstreamError(w, status, snippet(resp))
 		return
 	}
 
@@ -364,6 +364,21 @@ func writeAPIError(w http.ResponseWriter, status int, errType, message string) {
 			"message": message,
 		},
 	})
+}
+
+// writeUpstreamError reports a failed backend call. A 401 from a third-party
+// backend means that backend rejected its API key, not that the user's Claude
+// session expired — but Claude Science renders every 401 on a model call as
+// "Your Claude session is no longer valid. Please sign out and sign in again.",
+// which sends people chasing a login problem that does not exist. Report the
+// same failure as a bad gateway so the UI shows the backend's own message.
+func writeUpstreamError(w http.ResponseWriter, status int, body string) {
+	if status == http.StatusUnauthorized {
+		writeAPIError(w, http.StatusBadGateway, "api_error",
+			"backend rejected the API key (upstream 401): "+body)
+		return
+	}
+	writeAPIError(w, status, "api_error", fmt.Sprintf("backend returned %d: %s", status, body))
 }
 
 func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
