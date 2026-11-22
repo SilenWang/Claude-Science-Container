@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"encoding/json"
@@ -32,7 +32,34 @@ type modelAlias struct {
 	Model       string `json:"model"`
 }
 
-// config 全部来自环境变量，.env 是唯一真源（不读 config.json）。
+// ModelAlias 让配置包（以及下一阶段的 GUI）不需要重复定义 alias 结构。
+type ModelAlias = modelAlias
+
+// BackendOptions 描述一个 OpenAI 兼容上游。
+type BackendOptions struct {
+	Name         string
+	APIKey       string
+	BaseURL      string
+	UpstreamMode string
+	ModelPattern string
+}
+
+// Options 是显式构造 proxy 配置的入口：local 包把 config.json 翻译成
+// Options，容器里的 serve 则用 OptionsFromEnv 从环境变量构造。两条路径
+// 共用 newConfigFromOptions，默认值不会漂移。
+type Options struct {
+	DefaultBackend    string
+	ForceModel        string
+	ModelAliases      []ModelAlias
+	ModelListMode     string
+	InlineImagePolicy string
+	ProxyHost         string
+	ProxyPort         int
+	Backends          []BackendOptions
+}
+
+// config 描述一次 bridge 启动的全部路由配置。容器里的 serve 从环境变量构造，
+// 桌面的 local 从 config.json 构造，两条路径共用 newConfigFromOptions。
 type config struct {
 	DefaultBackend    string
 	ForceModel        string
@@ -177,28 +204,89 @@ var builtinModels = []map[string]any{
 	{"id": "gpt-4o", "display_name": "GPT-4o", "type": "model"},
 }
 
-// newConfigFromEnv 读取环境变量并构造配置。
-func newConfigFromEnv() *config {
-	c := &config{
-		DefaultBackend:    envOr("DEFAULT_BACKEND", "deepseek"),
-		ForceModel:        strings.TrimSpace(os.Getenv("FORCE_MODEL")),
-		ModelListMode:     strings.TrimSpace(os.Getenv("MODEL_LIST_MODE")),
+// OptionsFromEnv 把容器里沿用的环境变量翻译成 Options。
+func OptionsFromEnv() Options {
+	opts := Options{
+		DefaultBackend: envOr("DEFAULT_BACKEND", "deepseek"),
+		ForceModel:     os.Getenv("FORCE_MODEL"),
+		ModelListMode:  os.Getenv("MODEL_LIST_MODE"),
 		// 默认 omit_inline：默认模型 deepseek-flash 是纯文本模型，图片没有视觉出口；
 		// 显式设 preserve 之前，贴图会被丢弃并补占位文本。
-		InlineImagePolicy: strings.ToLower(envOr("INLINE_IMAGE_POLICY", "omit_inline")),
+		InlineImagePolicy: envOr("INLINE_IMAGE_POLICY", "omit_inline"),
 		ProxyHost:         envOr("PROXY_HOST", defaultProxyHost),
 		ProxyPort:         envIntOr("PROXY_PORT", defaultProxyPort),
+	}
+	for _, name := range []string{"deepseek", "openai", "custom"} {
+		prefix := strings.ToUpper(name)
+		opts.Backends = append(opts.Backends, BackendOptions{
+			Name:         name,
+			APIKey:       os.Getenv(prefix + "_API_KEY"),
+			BaseURL:      os.Getenv(prefix + "_BASE_URL"),
+			UpstreamMode: envOr(prefix+"_UPSTREAM_MODE", "openai"),
+			ModelPattern: os.Getenv(prefix + "_MODEL_PATTERN"),
+		})
+	}
+	return opts
+}
+
+// newConfigFromEnv 读取环境变量并构造配置，供容器里的 serve 使用。
+func newConfigFromEnv() *config {
+	aliases, warning := parseModelAliases(os.Getenv("MODEL_ALIASES"))
+	opts := OptionsFromEnv()
+	opts.ModelAliases = aliases
+	c := newConfigFromOptions(opts)
+	if warning != "" {
+		c.warnings = append([]string{warning}, c.warnings...)
+	}
+	return c
+}
+
+// NewConfig 用显式 Options 构造 proxy 配置。
+func NewConfig(opts Options) *config {
+	return newConfigFromOptions(opts)
+}
+
+// newConfigFromOptions 是环境变量与 config.json 两条路径的共同实现。
+func newConfigFromOptions(opts Options) *config {
+	c := &config{
+		DefaultBackend:    strings.ToLower(strings.TrimSpace(opts.DefaultBackend)),
+		ForceModel:        strings.TrimSpace(opts.ForceModel),
+		ModelListMode:     strings.TrimSpace(opts.ModelListMode),
+		InlineImagePolicy: strings.ToLower(strings.TrimSpace(opts.InlineImagePolicy)),
+		ProxyHost:         strings.TrimSpace(opts.ProxyHost),
+		ProxyPort:         opts.ProxyPort,
 		backends:          map[string]*backend{},
 	}
-	c.ModelAliases = parseModelAliases(os.Getenv("MODEL_ALIASES"), c)
+	if c.DefaultBackend == "" {
+		c.DefaultBackend = "deepseek"
+	}
+	if c.InlineImagePolicy == "" {
+		c.InlineImagePolicy = "omit_inline"
+	}
+	if c.ProxyHost == "" {
+		c.ProxyHost = defaultProxyHost
+	}
+	if c.ProxyPort == 0 {
+		c.ProxyPort = defaultProxyPort
+	}
+	c.ModelAliases = normalizeAliases(opts.ModelAliases)
+
+	byName := make(map[string]BackendOptions, len(opts.Backends))
+	for _, bo := range opts.Backends {
+		byName[strings.ToLower(strings.TrimSpace(bo.Name))] = bo
+	}
 
 	for _, name := range []string{"deepseek", "openai", "custom"} {
 		prefix := strings.ToUpper(name)
+		bo := byName[name]
 		b := &backend{
 			name:    name,
-			baseURL: normalizeBaseURL(os.Getenv(prefix + "_BASE_URL")),
-			apiKey:  strings.TrimSpace(os.Getenv(prefix + "_API_KEY")),
-			rawMode: envOr(prefix+"_UPSTREAM_MODE", "openai"),
+			baseURL: normalizeBaseURL(bo.BaseURL),
+			apiKey:  strings.TrimSpace(bo.APIKey),
+			rawMode: strings.TrimSpace(bo.UpstreamMode),
+		}
+		if b.rawMode == "" {
+			b.rawMode = "openai"
 		}
 		if name == "openai" && b.baseURL == "" {
 			b.baseURL = "https://api.openai.com/v1"
@@ -206,7 +294,7 @@ func newConfigFromEnv() *config {
 		if name == "deepseek" && b.baseURL == "" {
 			b.baseURL = "https://api.deepseek.com/v1"
 		}
-		if pattern := strings.TrimSpace(os.Getenv(prefix + "_MODEL_PATTERN")); pattern != "" {
+		if pattern := strings.TrimSpace(bo.ModelPattern); pattern != "" {
 			if re, err := regexp.Compile("(?i)" + pattern); err == nil {
 				b.modelPattern = re
 			} else {
@@ -234,15 +322,16 @@ func newConfigFromEnv() *config {
 }
 
 // parseModelAliases 接受 JSON 数组或 {"alias-id": {...}} 两种形式。
-func parseModelAliases(raw string, c *config) []modelAlias {
+// 第二个返回值是给用户看的告警（非法 JSON 时非空）。
+func parseModelAliases(raw string) ([]modelAlias, string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil
+		return nil, ""
 	}
 
 	var list []modelAlias
 	if err := json.Unmarshal([]byte(raw), &list); err == nil {
-		return normalizeAliases(list)
+		return normalizeAliases(list), ""
 	}
 
 	var byID map[string]json.RawMessage
@@ -262,11 +351,10 @@ func parseModelAliases(raw string, c *config) []modelAlias {
 			}
 			list = append(list, a)
 		}
-		return normalizeAliases(list)
+		return normalizeAliases(list), ""
 	}
 
-	c.warnings = append(c.warnings, "MODEL_ALIASES is not valid JSON; ignoring it")
-	return nil
+	return nil, "MODEL_ALIASES is not valid JSON; ignoring it"
 }
 
 func normalizeAliases(in []modelAlias) []modelAlias {

@@ -18,7 +18,7 @@ jobs:
           environments: default
 
       - name: Build all platforms
-        run: pixi run build
+        run: pixi run build_all
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -26,9 +26,9 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           files: |
-            helper/launcher-linux-amd64
-            helper/launcher-linux-arm64
-            helper/launcher-darwin-amd64
-            helper/launcher-darwin-arm64
-            helper/launcher-windows-amd64.exe
+            dist/claude-science-container-linux-amd64
+            dist/claude-science-container-linux-arm64
+            dist/claude-science-container-darwin-amd64
+            dist/claude-science-container-darwin-arm64
+            dist/claude-science-container-windows-amd64.exe
           generate_release_notes: true

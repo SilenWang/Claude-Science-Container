@@ -1,4 +1,4 @@
-package main
+package proxy
 
 // 假登录 / 假账号接口。CS 在无 Anthropic key 时仍需要这些接口保持"已登录"状态。
 // 值与上游实现保持一致，避免 CS 升级后字段对不上。

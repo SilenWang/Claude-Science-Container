@@ -4,68 +4,28 @@ version = "0.1.0"
 channels = ["conda-forge", "bioconda"]
 platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
 
-[tasks.build_image]
-cmd = "docker compose build --build-arg CACHE_BUST=$(date +%s)"
-
-[tasks.clean_linux]
-cmd = "rm -f launcher-linux-{{ arch }}"
-args = [{ arg = "arch", default = "amd64" }]
-cwd = "helper"
-
-[tasks.build_linux_arch]
-cmd = "GOOS=linux GOARCH={{ arch }} go build -o launcher-linux-{{ arch }} ."
-args = [{ arg = "arch", default = "amd64" }]
-cwd = "helper"
-depends-on = [{ task = "clean_linux", args = ["{{ arch }}"] }]
-
-[tasks.clean_darwin]
-cmd = "rm -f launcher-darwin-{{ arch }}"
-args = [{ arg = "arch", default = "amd64" }]
-cwd = "helper"
-
-[tasks.build_darwin_arch]
-cmd = "GOOS=darwin GOARCH={{ arch }} go build -o launcher-darwin-{{ arch }} ."
-args = [{ arg = "arch", default = "amd64" }]
-cwd = "helper"
-depends-on = [{ task = "clean_darwin", args = ["{{ arch }}"] }]
-
-[tasks.clean_windows]
-cmd = "rm -f launcher-windows-{{ arch }}.exe"
-args = [{ arg = "arch", default = "amd64" }]
-cwd = "helper"
-
-[tasks.install_goversioninfo]
-cmd = "go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest"
-cwd = "helper"
-
-[tasks.build_windows_arch]
-cmd = "goversioninfo -o resource_windows.syso versioninfo.json && GOOS=windows GOARCH={{ arch }} go build -ldflags=\"-s -w\" -o launcher-windows-{{ arch }}.exe . && rm -f resource_windows.syso"
-args = [{ arg = "arch", default = "amd64" }]
-cwd = "helper"
-depends-on = [
-    { task = "clean_windows", args = ["{{ arch }}"] },
-    { task = "install_goversioninfo" },
-]
-
+# 单一构建产物：proxy 桥 + forward/local CLI 在同一个二进制里。
 [tasks.build]
-cmd = "echo 'Build Done'"
-depends-on = [
-    { task = "build_linux_arch", args = ["amd64"] },
-    { task = "build_linux_arch", args = ["arm64"] },
-    { task = "build_darwin_arch", args = ["amd64"] },
-    { task = "build_darwin_arch", args = ["arm64"] },
-    { task = "build_windows_arch", args = ["amd64"] },
-]
-cwd = "helper"
+cmd = "go build -trimpath -ldflags=\"-s -w\" -o claude-science-container ."
 
-# /opt/api-bridge 的 Go 实现（仅标准库）。镜像构建也复用同一份 proxy/ 源码。
-[tasks.build_bridge]
-cmd = "go build -trimpath -ldflags=\"-s -w\" -o api-bridge ."
-cwd = "proxy"
+# 交叉编译发布包（dist/claude-science-container-<os>-<arch>）。
+[tasks.build_all]
+cmd = "sh -c 'set -e; mkdir -p dist; for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do os=${pair%/*}; arch=${pair#*/}; out=dist/claude-science-container-$os-$arch; if [ \"$os\" = windows ]; then out=$out.exe; fi; GOOS=$os GOARCH=$arch go build -trimpath -ldflags=\"-s -w\" -o \"$out\" .; done'"
+
+[tasks.test]
+cmd = "go test ./..."
+
+[tasks.vet]
+cmd = "go vet ./..."
 
 [tasks.test_bridge]
-cmd = "go test ./..."
-cwd = "proxy"
+cmd = "go test ./proxy/..."
+
+[tasks.clean]
+cmd = "rm -rf dist claude-science-container"
+
+[tasks.build_image]
+cmd = "docker compose build --build-arg CACHE_BUST=$(date +%s)"
 
 [activation.env]
 CGO_ENABLED = "0"

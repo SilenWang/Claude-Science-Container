@@ -1,9 +1,16 @@
-# /opt/api-bridge 的 Go 实现：只用标准库，构建阶段产出静态二进制。
-# 代码与 pixi 的 build_bridge / test_bridge 任务共用同一份 proxy/ 源码。
-FROM golang:1.26 AS bridge-build
+# 单一 Go 二进制：Anthropic→OpenAI 桥、forward/local CLI、setup-token 都在里面。
+# 桥的翻译逻辑仍是标准库；SSH 转发使用 golang.org/x/crypto/ssh。
+# 代码与 pixi 的 build / test 任务共用同一份源码。
+FROM golang:1.26 AS build
 WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY main.go ./
+COPY config/ ./config/
+COPY forward/ ./forward/
+COPY local/ ./local/
 COPY proxy/ ./proxy/
-RUN cd proxy && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api-bridge .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/claude-science-container .
 
 FROM ubuntu:24.04
 
@@ -31,12 +38,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt
 
-# 替换上游 Jyx0208/claude-science-api-bridge（Python）：不再 clone、打 patch、
-# 建 venv 或安装 pip 依赖，只拷一个静态二进制。
-COPY --from=bridge-build /out/api-bridge /opt/api-bridge/api-bridge
-RUN chmod 755 /opt/api-bridge/api-bridge
-# 运行层不应再有上游 Python 桥接的虚拟环境；构建期直接断言。
-RUN test ! -e /opt/api-bridge/.venv
+# 一个静态二进制同时提供 serve / setup-token（容器链路）与 forward / local（桌面）。
+COPY --from=build /out/claude-science-container /usr/local/bin/claude-science-container
+RUN chmod 755 /usr/local/bin/claude-science-container
 
 ARG CACHE_BUST
 
