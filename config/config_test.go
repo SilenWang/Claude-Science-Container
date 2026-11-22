@@ -144,6 +144,20 @@ func TestLoadFillsDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadKeepsExplicitlyEmptyPortForwards(t *testing.T) {
+	path := writeTemp(t, `{
+	  "forward": {"targets": [{"name": "box", "ssh_host": "192.0.2.1", "ssh_key": "/k", "port_forwards": []}]}
+	}`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Forward.Targets[0].PortForwards; got == nil || len(got) != 0 {
+		t.Fatalf("explicit empty port_forwards was replaced with %+v", got)
+	}
+}
+
 func TestLoadLegacySingleTarget(t *testing.T) {
 	path := writeTemp(t, `{
 	  "name": "old",

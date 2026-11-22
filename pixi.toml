@@ -15,6 +15,13 @@ cmd = "sh -c 'set -e; mkdir -p dist; for pair in linux/amd64 linux/arm64 darwin/
 [tasks.test]
 cmd = "go test ./..."
 
+[tasks.test_gui]
+cmd = "go test ./gui/..."
+
+# Render both tabs and their states to dist/screenshots, without a display.
+[tasks.screenshots]
+cmd = "sh -c 'mkdir -p dist/screenshots && SHOTS_DIR=\"$PWD/dist/screenshots\" go test ./gui -run TestScreenshots -v'"
+
 [tasks.vet]
 cmd = "go vet ./..."
 
@@ -32,4 +39,5 @@ CGO_ENABLED = "0"
 PATH = "$HOME/go/bin:$PATH"
 
 [dependencies]
-go = ">=1.26.4,<2"
+# mygo (the GUI toolkit) needs Go >= 1.27.3.
+go = ">=1.27.4,<2"

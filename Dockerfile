@@ -1,13 +1,14 @@
 # 单一 Go 二进制：Anthropic→OpenAI 桥、forward/local CLI、setup-token 都在里面。
 # 桥的翻译逻辑仍是标准库；SSH 转发使用 golang.org/x/crypto/ssh。
 # 代码与 pixi 的 build / test 任务共用同一份源码。
-FROM golang:1.26 AS build
+FROM golang:1.27 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY main.go ./
 COPY config/ ./config/
 COPY forward/ ./forward/
+COPY gui/ ./gui/
 COPY local/ ./local/
 COPY proxy/ ./proxy/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/claude-science-container .

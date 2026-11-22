@@ -23,7 +23,7 @@ Run [Claude Science](https://claude.ai/science) Linux edition with a third-party
 ```
 
 - **claude-science** — The official Claude Science Linux binary, configured to route API calls through the internal API bridge.
-- **claude-science-container** — The project's single Go binary. It contains the API bridge (`serve`), the OAuth token writer (`setup-token`), the remote SSH launcher (`forward`) and the local all-in-one mode (`local`). The bridge source lives under `proxy/`; its route and translation conventions follow [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
+- **claude-science-container** — The project's single Go binary. It contains the API bridge (`serve`), the OAuth token writer (`setup-token`), the remote SSH launcher (`forward`), the local all-in-one mode (`local`) and a desktop window with both modes as tabs (`gui`). The bridge source lives under `proxy/`; its route and translation conventions follow [claude-science-api-bridge](https://github.com/Jyx0208/claude-science-api-bridge) by [Jyx0208](https://github.com/Jyx0208).
 
 ## Build (single binary)
 
@@ -32,11 +32,12 @@ Everything compiles into one binary through pixi-managed Go:
 ```bash
 pixi run build        # host binary: ./claude-science-container
 pixi run build_all    # cross-compiled release binaries in dist/
-pixi run test         # go test ./...
+pixi run test         # go test ./... (CLI, config, proxy and GUI view tests)
 pixi run vet          # go vet ./...
+pixi run screenshots  # render both GUI tabs to dist/screenshots (no display needed)
 ```
 
-The Docker image compiles the same source in a `golang:1.26` build stage and copies one static binary into the runtime layer: nothing is cloned from the upstream Python project, no patches are applied, and no venv/pip dependencies exist in the image.
+The Docker image compiles the same source in a `golang:1.27` build stage and copies one static binary into the runtime layer: nothing is cloned from the upstream Python project, no patches are applied, and no venv/pip dependencies exist in the image.
 
 The container keeps using environment variables (`.env` → docker-compose → `serve`). The desktop commands (`forward` / `local`) use a single `config.json` next to the executable; `.env` is only a compatibility fallback for container runs.
 
@@ -191,6 +192,7 @@ When enabled, the sandbox gets `/dev/nvidia*` and `/sys/module/nvidia*` dev-boun
 
 | Command | What it does |
 |---------|--------------|
+| *(none)* / `gui` | Open the desktop window with the 转发 and 启动本地的 Claude Science tabs (use `--cli` for the terminal launcher) |
 | `forward` | SSH-forward a remote Claude Science, fetch its login URL, optionally open the browser |
 | `local` | Write the fake OAuth token, start the proxy in-process, launch a local `claude-science serve` against it, print the login URL |
 | `serve` | Run only the API bridge from environment variables (container / supervisord) |
@@ -203,7 +205,7 @@ Run `claude-science-container <command> --help` for each command's flags.
 ### config.json: location and first run
 
 - The file is **next to the executable**: `<dir-of-binary>/config.json`. `CSC_CONFIG=/path/to/config.json` overrides it, and `config path` prints the resolved path.
-- On the first `forward`, `local`, `config show` or bare invocation the file is created automatically with every default filled in, and the path plus next steps are printed.
+- On the first `forward`, `local`, `config show`, GUI launch or `--cli` invocation the file is created automatically with every default filled in.
 - It contains API keys, so it is written with mode `0600`.
 - Legacy helper files remain readable: both a single-target object and `{"targets":[...]}` are accepted. The canonical shape is `{"forward": {...}, "local": {...}}`.
 - `.env` is only read by the container's `serve`. `local` additionally falls back to `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` / `CUSTOM_API_KEY` (and the matching `*_BASE_URL`) when the config value is empty.
@@ -280,7 +282,10 @@ Example:
 Usage:
 
 ```bash
-# first run: creates config.json and prints the path and next steps
+# first run, terminal: creates config.json and prints the path and next steps
+./claude-science-container --cli
+
+# desktop window (the default when the binary is started without a command)
 ./claude-science-container
 
 # remote mode: fill in forward.targets[].ssh_host / ssh_key first
@@ -307,6 +312,30 @@ ssh -L 9876:127.0.0.1:9876 -L 9981:127.0.0.1:9981 user@your-server
 # Then fetch the URL from the container:
 docker exec claude-science claude-science url
 ```
+
+## GUI (desktop window)
+
+Started without a command, the binary opens a window with two tabs. Both tabs edit the **same** `config.json` next to the executable: a save from the window is what `forward` / `local` read on their next run, and a file edited by hand (or by `config init`) appears after `重新加载配置` (Cmd/Ctrl+R). Fields the window does not show — `model_aliases`, `model_list_mode`, `inline_image_policy` — are preserved on save. Every save is atomic and keeps mode `0600`; starting either mode saves the draft first, so what runs is what you see.
+
+### 转发 — remote forwarding
+
+One card per `forward.targets[]` entry. The card shows the name, `user@host` and the tunnel state (idle, connecting, connected, failed); technical text stays folded behind 详细信息.
+
+- **Card actions**: 连接 (opens the tunnel, fetches the remote login URL and opens it), 打开浏览器 (reopens that URL), 断开 / 停止, 编辑 (reveals the form).
+- **Form**: `名称`, `SSH 主机`, `SSH 端口`, `SSH 用户`, `密钥路径`, `容器 ID` and `远端命令`. The container id wraps the command in `docker exec`, exactly like the CLI.
+- **端口转发**: any number of `本地 → 远端` pairs, with 添加转发 / 移除 per row.
+- **多 target**: 添加服务器 adds a card, 删除这台服务器 removes one; every card keeps its own tunnel, and unchanged cards keep running when another card is saved. The next `forward --target <name>` uses whatever this tab saved.
+
+### 启动本地的 Claude Science — local stack
+
+One form plus a running-state card at the top.
+
+- **接口后端**: `DeepSeek`, `OpenAI` or `自定义（OpenAI 兼容）`, with an `API Key` and `Base URL` per backend (switching backends restores that backend's values). An empty key falls back to the matching `*_API_KEY` environment variable, as in the CLI.
+- **模型与代理**: `强制模型` (`force_model`) and `代理端口` (`proxy_port`); the bridge still listens on `127.0.0.1`.
+- **Claude Science**: `可执行文件路径` (name on `PATH` or absolute), `Web 端口` (`claude_science_port`) and `启动后自动打开浏览器`.
+- **启动** saves, prepares `~/.claude-science` credentials, starts the in-process bridge and then `claude-science serve`; the card shows the login URL and offers 打开 Web UI. 停止 closes the process and the bridge together.
+
+The GUI is a desktop convenience only; the container image keeps using `serve` with environment variables. For screenshots of both tabs without a display, run `pixi run screenshots` (writes `dist/screenshots/*.png`); `pixi run test_gui` runs the headless view and config round-trip tests alone.
 
 ## Configuration (container environment variables)
 
