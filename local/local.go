@@ -7,6 +7,7 @@ package local
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/SilenWang/Claude-Science-Container/config"
@@ -209,89 +211,110 @@ func (r *Runner) Start(parent context.Context) error {
 	r.report(PhaseProxy, "local API bridge listening on http://"+addr, "")
 
 	baseURL := "http://" + addr
-	cmd := r.opts.NewCommand(ctx, r.csPath,
-		"serve", "--no-browser",
-		"--host", loopbackHost(r.opts.Config.ProxyHost),
-		"--port", strconv.Itoa(r.opts.Config.ClaudeSciencePort),
-	)
-	cmd.Env = append(os.Environ(), "ANTHROPIC_BASE_URL="+baseURL)
+	for attempt := 0; ; attempt++ {
+		cmd := r.opts.NewCommand(ctx, r.csPath,
+			"serve", "--no-browser",
+			"--host", loopbackHost(r.opts.Config.ProxyHost),
+			"--port", strconv.Itoa(r.opts.Config.ClaudeSciencePort),
+		)
+		cmd.Env = append(os.Environ(), "ANTHROPIC_BASE_URL="+baseURL)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		err = fmt.Errorf("claude-science stdout: %w", err)
-		r.report(PhaseError, err.Error(), "")
-		r.fail(err)
-		return err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		cancel()
-		err = fmt.Errorf("claude-science stderr: %w", err)
-		r.report(PhaseError, err.Error(), "")
-		r.fail(err)
-		return err
-	}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			cancel()
+			err = fmt.Errorf("claude-science stdout: %w", err)
+			r.report(PhaseError, err.Error(), "")
+			r.fail(err)
+			return err
+		}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			cancel()
+			err = fmt.Errorf("claude-science stderr: %w", err)
+			r.report(PhaseError, err.Error(), "")
+			r.fail(err)
+			return err
+		}
 
-	r.report(PhaseStarting, fmt.Sprintf("starting %s serve --no-browser --port %d (ANTHROPIC_BASE_URL=%s)",
-		r.csPath, r.opts.Config.ClaudeSciencePort, baseURL), "")
-	if err := cmd.Start(); err != nil {
-		cancel()
-		err = fmt.Errorf("starting claude-science: %w", err)
-		r.report(PhaseError, err.Error(), "")
-		r.fail(err)
-		return err
-	}
-	r.mu.Lock()
-	r.cmd = cmd
-	r.mu.Unlock()
+		r.report(PhaseStarting, fmt.Sprintf("starting %s serve --no-browser --port %d (ANTHROPIC_BASE_URL=%s)",
+			r.csPath, r.opts.Config.ClaudeSciencePort, baseURL), "")
+		if err := cmd.Start(); err != nil {
+			cancel()
+			err = fmt.Errorf("starting claude-science: %w", err)
+			r.report(PhaseError, err.Error(), "")
+			r.fail(err)
+			return err
+		}
+		r.mu.Lock()
+		r.cmd = cmd
+		r.mu.Unlock()
 
-	urlCh := make(chan string, 1)
-	var urlOnce sync.Once
-	go r.scanOutput(stdout, urlCh, &urlOnce)
-	go r.scanOutput(stderr, urlCh, &urlOnce)
+		urlCh := make(chan string, 1)
+		var urlOnce sync.Once
+		var attached atomic.Bool
+		go r.scanOutput(stdout, urlCh, &urlOnce, &attached)
+		go r.scanOutput(stderr, urlCh, &urlOnce, &attached)
 
-	exitCh := make(chan error, 1)
-	go func() { exitCh <- cmd.Wait() }()
+		exitCh := make(chan error, 1)
+		go func() { exitCh <- cmd.Wait() }()
 
-	select {
-	case url := <-urlCh:
-		r.setURL(url)
-		r.report(PhaseReady, "claude-science ready at "+url, url)
-		if r.opts.AutoOpenBrowser {
-			if err := r.opts.OpenBrowser(url); err != nil {
-				fmt.Fprintf(r.opts.Stderr, "warning: could not open browser: %v\n", err)
+		select {
+		case url := <-urlCh:
+			if attached.Load() && attempt == 0 {
+				r.report(PhasePreparing, "claude-science attached to an already running daemon; stopping it and starting a fresh one", "")
+				if stopErr := r.stopDaemon(ctx); stopErr != nil {
+					fmt.Fprintf(r.opts.Stderr, "warning: %v\n", stopErr)
+				}
+				continue
 			}
-		}
-		go r.reap(exitCh)
-		return nil
-	case err := <-exitCh:
-		if r.stopRequested() {
-			r.finish(nil)
+			r.setURL(url)
+			r.report(PhaseReady, "claude-science ready at "+url, url)
+			if r.opts.AutoOpenBrowser {
+				if err := r.opts.OpenBrowser(url); err != nil {
+					fmt.Fprintf(r.opts.Stderr, "warning: could not open browser: %v\n", err)
+				}
+			}
+			go r.reap(exitCh)
 			return nil
-		}
-		if err == nil {
-			err = errors.New("process exited")
-		}
-		r.report(PhaseError, fmt.Sprintf("claude-science exited: %v", err), "")
-		r.finish(err)
-		return fmt.Errorf("claude-science exited: %w", err)
-	case err := <-proxyErr:
-		if r.stopRequested() {
-			r.finish(nil)
+		case err := <-exitCh:
+			if r.stopRequested() {
+				r.finish(nil)
+				return nil
+			}
+			// `serve` exits right after printing a login URL when it attached
+			// to a daemon that was already running. That daemon does not carry
+			// our ANTHROPIC_BASE_URL, so the bridge would be bypassed; stop it
+			// and start a fresh one instead of leaving the stack half-up.
+			if attached.Load() && attempt == 0 {
+				r.report(PhasePreparing, "claude-science attached to an already running daemon; stopping it and starting a fresh one", "")
+				if stopErr := r.stopDaemon(ctx); stopErr != nil {
+					fmt.Fprintf(r.opts.Stderr, "warning: %v\n", stopErr)
+				}
+				continue
+			}
+			if err == nil {
+				err = errors.New("process exited")
+			}
+			r.report(PhaseError, fmt.Sprintf("claude-science exited: %v", err), "")
+			r.finish(err)
+			return fmt.Errorf("claude-science exited: %w", err)
+		case err := <-proxyErr:
+			if r.stopRequested() {
+				r.finish(nil)
+				return nil
+			}
+			cancel()
+			r.report(PhaseError, fmt.Sprintf("local API bridge exited: %v", err), "")
+			r.finish(err)
+			return fmt.Errorf("local API bridge exited: %w", err)
+		case <-time.After(r.opts.URLWait):
+			r.report(PhaseReady, fmt.Sprintf("claude-science is running (no login URL after %s; check the output above)", r.opts.URLWait), "")
+			go r.reap(exitCh)
 			return nil
+		case <-ctx.Done():
+			r.finish(nil)
+			return ctx.Err()
 		}
-		cancel()
-		r.report(PhaseError, fmt.Sprintf("local API bridge exited: %v", err), "")
-		r.finish(err)
-		return fmt.Errorf("local API bridge exited: %w", err)
-	case <-time.After(r.opts.URLWait):
-		r.report(PhaseReady, fmt.Sprintf("claude-science is running (no login URL after %s; check the output above)", r.opts.URLWait), "")
-		go r.reap(exitCh)
-		return nil
-	case <-ctx.Done():
-		r.finish(nil)
-		return ctx.Err()
 	}
 }
 
@@ -347,10 +370,35 @@ func (r *Runner) stopDaemon(ctx context.Context) error {
 	cmd := r.opts.NewCommand(stopCtx, r.csPath, "stop")
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("stopping the claude-science daemon that was already running: %w (run `%s stop` and retry)", err, r.csPath)
+	err := cmd.Run()
+	if err == nil {
+		return nil
 	}
-	return nil
+	// The stop client can be killed by our own deadline while the daemon is
+	// already shutting down (stopping the sandbox takes a moment). Only treat
+	// that as a failure when a daemon is still alive afterwards.
+	if !r.daemonRunning(ctx) {
+		return nil
+	}
+	return fmt.Errorf("stopping the claude-science daemon that was already running: %w (run `%s stop` and retry)", err, r.csPath)
+}
+
+// daemonRunning reports whether claude-science still has a live daemon. The
+// status command always exits 0, so only the JSON body decides.
+func (r *Runner) daemonRunning(ctx context.Context) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, r.opts.StopWait)
+	defer cancel()
+	out, err := r.opts.NewCommand(probeCtx, r.csPath, "status").Output()
+	if err != nil {
+		return false
+	}
+	var status struct {
+		Running bool `json:"running"`
+	}
+	if json.Unmarshal(out, &status) != nil {
+		return false
+	}
+	return status.Running
 }
 
 // createEncryptionKey briefly runs claude-science detached (as the container
@@ -487,21 +535,40 @@ func (r *Runner) findInstalledClaudeScience() (string, []string) {
 	return "", candidates
 }
 
-func (r *Runner) scanOutput(reader io.Reader, urlCh chan<- string, once *sync.Once) {
+func (r *Runner) scanOutput(reader io.Reader, urlCh chan<- string, once *sync.Once, attached *atomic.Bool) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		fmt.Fprintln(r.opts.Stdout, line)
+		if strings.Contains(strings.ToLower(line), "daemon already running") {
+			attached.Store(true)
+			continue
+		}
 		// Never mistake the proxy address (or an echoed env line) for the
 		// claude-science login URL.
 		if strings.HasPrefix(strings.TrimSpace(line), "ANTHROPIC_BASE_URL=") {
 			continue
 		}
-		if url := forward.ParseLoginURL(line); url != "" {
+		if url := parseClaudeScienceURL(line); url != "" {
 			once.Do(func() { urlCh <- url })
 		}
 	}
+}
+
+// parseClaudeScienceURL extracts the Web UI login URL from a `serve` output
+// line. A bare "first URL in the line" match is wrong here: the daemon also
+// prints unrelated addresses such as
+//
+//	[daemon] sandbox origin: http://localhost:49431/mcp_apps
+//
+// which points at the sandbox content server, not the app, and would otherwise
+// become the ready URL and get opened in the browser.
+func parseClaudeScienceURL(line string) string {
+	if strings.Contains(line, "/mcp_apps") {
+		return ""
+	}
+	return forward.ParseLoginURL(line)
 }
 
 // reap waits for claude-science to exit after Start has already returned.

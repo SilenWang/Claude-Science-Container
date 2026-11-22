@@ -538,3 +538,100 @@ func TestClaudeScienceCandidatesPerPlatform(t *testing.T) {
 		}
 	}
 }
+
+func TestParseClaudeScienceURLAvoidsSandboxOrigin(t *testing.T) {
+	cases := []struct{ line, want string }{
+		{"[daemon] sandbox origin: http://localhost:49431/mcp_apps", ""},
+		{"  Web UI → http://localhost:49430/?nonce=abc123", "http://localhost:49430/?nonce=abc123"},
+		{"  open http://localhost:49410/", "http://localhost:49410/"},
+		{"  Remote? Forward both ports: 49430 (app) and 49431 (sandbox content)", ""},
+		{"ANTHROPIC_BASE_URL=http://127.0.0.1:9876", "http://127.0.0.1:9876"},
+	}
+	for _, tc := range cases {
+		if got := parseClaudeScienceURL(tc.line); got != tc.want {
+			t.Fatalf("parseClaudeScienceURL(%q) = %q, want %q", tc.line, got, tc.want)
+		}
+	}
+}
+
+// TestRunnerRetriesAfterAttachingToAStaleDaemon covers the "the bridge starts
+// and stops right away" report: a leftover daemon makes `serve` print a URL and
+// exit 0. The runner must stop that daemon and start a fresh one instead of
+// treating the exit as a failure.
+func TestRunnerRetriesAfterAttachingToAStaleDaemon(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake claude-science uses a POSIX shell script")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeKey(t, home)
+
+	counter := filepath.Join(home, "serve-count")
+	logPath := filepath.Join(home, "cs.log")
+	script := `#!/bin/sh
+echo "cs $*" >> "` + logPath + `"
+if [ "$1" = "serve" ]; then
+  n=0
+  [ -f "` + counter + `" ] && n=$(cat "` + counter + `")
+  n=$((n+1))
+  printf '%s' "$n" > "` + counter + `"
+  if [ "$n" -eq 1 ]; then
+    echo "[claude-science] daemon already running on port 49410 (pid 123)"
+    echo "  open http://localhost:49410/"
+    exit 0
+  fi
+  echo "  Web UI → http://localhost:49430/?nonce=fresh"
+  sleep 60
+fi
+if [ "$1" = "stop" ]; then
+  exit 0
+fi
+`
+	csPath := filepath.Join(home, "attaching-claude-science")
+	if err := os.WriteFile(csPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake claude-science: %v", err)
+	}
+
+	cfg := baseConfig(t, csPath, freePort(t))
+	cfg.ClaudeSciencePort = freePort(t)
+	var stdout, stderr syncBuffer
+	runner := New(Options{
+		Config: cfg,
+		Stdout: &stdout,
+		Stderr: &stderr,
+		StartProxy: func(ctx context.Context, opts proxy.Options, version string, w io.Writer) error {
+			<-ctx.Done()
+			return nil
+		},
+		WaitProxy: func(ctx context.Context, addr string, timeout time.Duration) error { return nil },
+		URLWait:   5 * time.Second,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := runner.Start(ctx); err != nil {
+		t.Fatalf("Start: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := runner.URL(); got != "http://localhost:49430/?nonce=fresh" {
+		t.Fatalf("URL() = %q\nstdout:\n%s", got, stdout.String())
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	var serves []int
+	stopBetween := false
+	for i, line := range strings.Split(strings.TrimSpace(string(log)), "\n") {
+		if strings.HasPrefix(line, "cs serve") {
+			serves = append(serves, i)
+		} else if line == "cs stop" && len(serves) == 1 {
+			stopBetween = true
+		}
+	}
+	if len(serves) != 2 || !stopBetween {
+		t.Fatalf("expected two serves with a stop between them; got:\n%s", log)
+	}
+	runner.Stop()
+	if err := runner.Wait(); err != nil {
+		t.Fatalf("Wait after Stop: %v", err)
+	}
+}
