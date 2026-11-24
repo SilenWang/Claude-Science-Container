@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'launcher*'
+      - 'csh*'
 
 jobs:
   build-and-release:
@@ -26,9 +27,9 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           files: |
-            dist/claude-science-container-linux-amd64
-            dist/claude-science-container-linux-arm64
-            dist/claude-science-container-darwin-amd64
-            dist/claude-science-container-darwin-arm64
-            dist/claude-science-container-windows-amd64.exe
+            dist/csh-linux-amd64
+            dist/csh-linux-arm64
+            dist/csh-darwin-amd64
+            dist/csh-darwin-arm64
+            dist/csh-windows-amd64.exe
           generate_release_notes: true

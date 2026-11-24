@@ -146,6 +146,7 @@ func (a *App) localView(c *ui.Context) {
 				return textField(c, "cs-port", &f.csPort, "9981")
 			})
 		ui.Toggle(c.Key("open-browser"), &f.openBrowser, "启动后自动打开浏览器")
+		hint(c, "留空或填 claude-science 时先查 PATH，再自动找 ~/.claude-science/bin 与 macOS 的「Claude Science.app」；也可直接填可执行文件完整路径。")
 	})
 
 	a.localActions(c)

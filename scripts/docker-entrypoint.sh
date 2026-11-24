@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CS_BIN="/usr/local/bin/claude-science"
-CS_CLI="/usr/local/bin/claude-science-container"
+CS_CLI="/usr/local/bin/csh"
 CS_HOME="${HOME}/.claude-science"
 ENC_KEY="${CS_HOME}/encryption.key"
 

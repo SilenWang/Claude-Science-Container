@@ -1,4 +1,4 @@
-// Command claude-science-container is the single binary for this project: it
+// Command csh (claude-science-helper) is the single binary for this project: it
 // keeps the container's proxy/setup-token commands, forwards SSH port forwards
 // to a remote Claude Science, and runs the whole local stack against a
 // third-party API backend. The GUI phase imports the same config, forward and
@@ -26,7 +26,7 @@ import (
 // version can be overridden with -ldflags "-X main.version=...".
 var version = "0.1.0"
 
-const binaryName = "claude-science-container"
+const binaryName = "csh"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -80,7 +80,7 @@ func runGUI() {
 }
 
 func usage(w *os.File) {
-	fmt.Fprintf(w, `Claude Science Container — single CLI for the container, remote forwarding and local mode.
+	fmt.Fprintf(w, `csh (claude-science-helper) — one CLI for the container, remote forwarding and local mode.
 
 usage: %s [command] [flags]
 

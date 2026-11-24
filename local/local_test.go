@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -396,5 +397,241 @@ func TestProxyOptionsMapping(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("custom backend not mapped: %+v", opts.Backends)
+	}
+}
+
+func TestResolveClaudeSciencePrefersPATH(t *testing.T) {
+	home := t.TempDir()
+	installed := filepath.Join(home, ".claude-science", "bin", "claude-science")
+	if err := os.MkdirAll(filepath.Dir(installed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installed, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default().Local
+	arena := t.TempDir()
+	onPath := filepath.Join(arena, "claude-science")
+	if err := os.WriteFile(onPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := New(Options{
+		Config:   cfg,
+		HomeDir:  func() (string, error) { return home, nil },
+		LookPath: func(string) (string, error) { return onPath, nil },
+	})
+	got, err := runner.resolveClaudeScience()
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != onPath {
+		t.Fatalf("resolved = %q, want PATH hit %q", got, onPath)
+	}
+}
+
+func TestResolveClaudeScienceFallsBackToInstallerPath(t *testing.T) {
+	home := t.TempDir()
+	installed := filepath.Join(home, ".claude-science", "bin", "claude-science")
+	if err := os.MkdirAll(filepath.Dir(installed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installed, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default().Local // default name "claude-science"
+	runner := New(Options{
+		Config:  cfg,
+		HomeDir: func() (string, error) { return home, nil },
+		LookPath: func(string) (string, error) {
+			return "", exec.ErrNotFound
+		},
+	})
+	got, err := runner.resolveClaudeScience()
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != installed {
+		t.Fatalf("resolved = %q, want %q", got, installed)
+	}
+}
+
+func TestResolveClaudeScienceDoesNotFallBackForCustomName(t *testing.T) {
+	home := t.TempDir()
+	installed := filepath.Join(home, ".claude-science", "bin", "claude-science")
+	if err := os.MkdirAll(filepath.Dir(installed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installed, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default().Local
+	cfg.ClaudeSciencePath = "claude-science-beta"
+	runner := New(Options{
+		Config:  cfg,
+		HomeDir: func() (string, error) { return home, nil },
+		LookPath: func(string) (string, error) {
+			return "", exec.ErrNotFound
+		},
+	})
+	if _, err := runner.resolveClaudeScience(); err == nil {
+		t.Fatal("resolve succeeded for a custom name that is not on PATH")
+	}
+}
+
+func TestResolveClaudeScienceReportsSearchedLocations(t *testing.T) {
+	home := t.TempDir()
+	cfg := config.Default().Local
+	runner := New(Options{
+		Config:  cfg,
+		HomeDir: func() (string, error) { return home, nil },
+		LookPath: func(string) (string, error) {
+			return "", exec.ErrNotFound
+		},
+		ClaudeScienceCandidates: func(home string) []string {
+			return []string{filepath.Join(home, ".claude-science", "bin", "claude-science")}
+		},
+	})
+	_, err := runner.resolveClaudeScience()
+	if err == nil {
+		t.Fatal("resolve succeeded with no claude-science anywhere")
+	}
+	msg := err.Error()
+	for _, want := range []string{"not found in PATH or at", filepath.Join(home, ".claude-science", "bin", "claude-science"), "local.claude_science_path"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not mention %q", msg, want)
+		}
+	}
+}
+
+func TestClaudeScienceCandidatesPerPlatform(t *testing.T) {
+	home := "/Users/example"
+	darwin := claudeScienceCandidates(home, "darwin")
+	wantDarwin := []string{
+		"/Users/example/.claude-science/bin/claude-science",
+		"/Users/example/.local/bin/claude-science",
+		"/Applications/Claude Science.app/Contents/Resources/bin/claude-science",
+		"/Users/example/Applications/Claude Science.app/Contents/Resources/bin/claude-science",
+		"/opt/homebrew/bin/claude-science",
+		"/opt/local/bin/claude-science",
+		"/usr/local/bin/claude-science",
+	}
+	if len(darwin) != len(wantDarwin) {
+		t.Fatalf("darwin candidates = %v", darwin)
+	}
+	for i, want := range wantDarwin {
+		if darwin[i] != want {
+			t.Fatalf("darwin candidate %d = %q, want %q", i, darwin[i], want)
+		}
+	}
+
+	linux := claudeScienceCandidates("/root", "linux")
+	if linux[0] != "/root/.claude-science/bin/claude-science" {
+		t.Fatalf("linux candidates = %v", linux)
+	}
+	for _, candidate := range linux {
+		if strings.Contains(candidate, "Claude Science.app") {
+			t.Fatalf("linux candidates include a macOS bundle path: %v", linux)
+		}
+	}
+}
+
+func TestParseClaudeScienceURLAvoidsSandboxOrigin(t *testing.T) {
+	cases := []struct{ line, want string }{
+		{"[daemon] sandbox origin: http://localhost:49431/mcp_apps", ""},
+		{"  Web UI → http://localhost:49430/?nonce=abc123", "http://localhost:49430/?nonce=abc123"},
+		{"  open http://localhost:49410/", "http://localhost:49410/"},
+		{"  Remote? Forward both ports: 49430 (app) and 49431 (sandbox content)", ""},
+		{"ANTHROPIC_BASE_URL=http://127.0.0.1:9876", "http://127.0.0.1:9876"},
+	}
+	for _, tc := range cases {
+		if got := parseClaudeScienceURL(tc.line); got != tc.want {
+			t.Fatalf("parseClaudeScienceURL(%q) = %q, want %q", tc.line, got, tc.want)
+		}
+	}
+}
+
+// TestRunnerRetriesAfterAttachingToAStaleDaemon covers the "the bridge starts
+// and stops right away" report: a leftover daemon makes `serve` print a URL and
+// exit 0. The runner must stop that daemon and start a fresh one instead of
+// treating the exit as a failure.
+func TestRunnerRetriesAfterAttachingToAStaleDaemon(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake claude-science uses a POSIX shell script")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeKey(t, home)
+
+	counter := filepath.Join(home, "serve-count")
+	logPath := filepath.Join(home, "cs.log")
+	script := `#!/bin/sh
+echo "cs $*" >> "` + logPath + `"
+if [ "$1" = "serve" ]; then
+  n=0
+  [ -f "` + counter + `" ] && n=$(cat "` + counter + `")
+  n=$((n+1))
+  printf '%s' "$n" > "` + counter + `"
+  if [ "$n" -eq 1 ]; then
+    echo "[claude-science] daemon already running on port 49410 (pid 123)"
+    echo "  open http://localhost:49410/"
+    exit 0
+  fi
+  echo "  Web UI → http://localhost:49430/?nonce=fresh"
+  sleep 60
+fi
+if [ "$1" = "stop" ]; then
+  exit 0
+fi
+`
+	csPath := filepath.Join(home, "attaching-claude-science")
+	if err := os.WriteFile(csPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake claude-science: %v", err)
+	}
+
+	cfg := baseConfig(t, csPath, freePort(t))
+	cfg.ClaudeSciencePort = freePort(t)
+	var stdout, stderr syncBuffer
+	runner := New(Options{
+		Config: cfg,
+		Stdout: &stdout,
+		Stderr: &stderr,
+		StartProxy: func(ctx context.Context, opts proxy.Options, version string, w io.Writer) error {
+			<-ctx.Done()
+			return nil
+		},
+		WaitProxy: func(ctx context.Context, addr string, timeout time.Duration) error { return nil },
+		URLWait:   5 * time.Second,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := runner.Start(ctx); err != nil {
+		t.Fatalf("Start: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := runner.URL(); got != "http://localhost:49430/?nonce=fresh" {
+		t.Fatalf("URL() = %q\nstdout:\n%s", got, stdout.String())
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	var serves []int
+	stopBetween := false
+	for i, line := range strings.Split(strings.TrimSpace(string(log)), "\n") {
+		if strings.HasPrefix(line, "cs serve") {
+			serves = append(serves, i)
+		} else if line == "cs stop" && len(serves) == 1 {
+			stopBetween = true
+		}
+	}
+	if len(serves) != 2 || !stopBetween {
+		t.Fatalf("expected two serves with a stop between them; got:\n%s", log)
+	}
+	runner.Stop()
+	if err := runner.Wait(); err != nil {
+		t.Fatalf("Wait after Stop: %v", err)
 	}
 }

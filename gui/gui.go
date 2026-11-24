@@ -1,4 +1,4 @@
-// Package gui is the desktop window of claude-science-container: two tabs —
+// Package gui is the desktop window of csh (claude-science-helper): two tabs —
 // remote forwarding and a local Claude Science — editing the same config.json
 // the CLI reads. The view layer is headless-testable (see the _test files):
 // every state renders with ui.NewTester, without a display.
@@ -52,7 +52,7 @@ func Run(configPath string) error {
 
 	mygo.App.WhenReady(func() {
 		app.win = mygo.NewWindow(mygo.WindowOptions{
-			Title:     "Claude Science",
+			Title:     "csh",
 			Width:     760,
 			Height:    640,
 			MinWidth:  560,
