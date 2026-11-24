@@ -371,6 +371,7 @@ func TestProxyOptionsMapping(t *testing.T) {
 	l.ForceModel = "custom-model"
 	l.ModelListMode = "aliases"
 	l.InlineImagePolicy = "preserve"
+	l.ImageFallback = config.ImageFallback{Mode: "auto", Backend: "openai", Model: "gpt-4o"}
 	l.ProxyHost = "0.0.0.0"
 	l.ProxyPort = 12345
 	l.ModelAliases = []config.ModelAlias{{ID: "claude-sonnet-4-5", DisplayName: "Mine", Backend: "custom", Model: "m1"}}
@@ -379,6 +380,9 @@ func TestProxyOptionsMapping(t *testing.T) {
 	opts := ProxyOptions(l)
 	if opts.DefaultBackend != "custom" || opts.ForceModel != "custom-model" {
 		t.Fatalf("options = %+v", opts)
+	}
+	if opts.ImageFallback.Mode != "auto" || opts.ImageFallback.Backend != "openai" || opts.ImageFallback.Model != "gpt-4o" {
+		t.Fatalf("image fallback = %+v", opts.ImageFallback)
 	}
 	if opts.ProxyHost != "127.0.0.1" || opts.ProxyPort != 12345 {
 		t.Fatalf("listen = %s:%d", opts.ProxyHost, opts.ProxyPort)

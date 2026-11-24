@@ -57,6 +57,16 @@ type Backend struct {
 	ModelPattern string `json:"model_pattern,omitempty"`
 }
 
+// ImageFallback 配置图片 vision fallback：请求带图、而当前映射的模型
+// 看不了图时，整条请求改走这里指定的后端与模型。Mode 为 auto（默认）或
+// off；Backend/Model 都为空表示未配置（fallback 不生效，图片按
+// InlineImagePolicy 处理，与补齐 fallback 之前完全一致）。
+type ImageFallback struct {
+	Mode    string `json:"mode,omitempty"`
+	Backend string `json:"backend,omitempty"`
+	Model   string `json:"model,omitempty"`
+}
+
 // Local is everything the local command needs: the proxy backends plus how to
 // launch claude-science against that proxy.
 type Local struct {
@@ -65,6 +75,7 @@ type Local struct {
 	ModelAliases      []ModelAlias       `json:"model_aliases"`
 	ModelListMode     string             `json:"model_list_mode,omitempty"`
 	InlineImagePolicy string             `json:"inline_image_policy"`
+	ImageFallback     ImageFallback      `json:"image_fallback,omitzero"`
 	ProxyHost         string             `json:"proxy_host"`
 	ProxyPort         int                `json:"proxy_port"`
 	ClaudeSciencePath string             `json:"claude_science_path"`
@@ -113,6 +124,13 @@ func Default() *Config {
 			ForceModel:        defaultForceModel,
 			ModelAliases:      []ModelAlias{},
 			InlineImagePolicy: defaultInlineImagePolicy,
+			// 首个配置里就写出 fallback 的三个字段，方便用户改成真正的
+			// vision 后端；deepseek-flash 是纯文本模型，所以默认值本身不接管。
+			ImageFallback: ImageFallback{
+				Mode:    "auto",
+				Backend: "deepseek",
+				Model:   "deepseek-flash",
+			},
 			ProxyHost:         defaultProxyHost,
 			ProxyPort:         defaultProxyPort,
 			ClaudeSciencePath: defaultClaudeSciencePath,

@@ -122,6 +122,17 @@ func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		modes[name] = normalizeUpstreamMode(b.rawMode)
 		configured[name] = b.apiKey != "" && b.baseURL != ""
 	}
+	fallback := map[string]any{
+		"mode":    orNone(s.cfg.ImageFallback.Mode),
+		"backend": orNone(s.cfg.ImageFallback.Backend),
+		"model":   orNone(s.cfg.ImageFallback.Model),
+	}
+	if resolution := s.cfg.resolveImageFallback(); resolution.backend != nil {
+		fallback["active"] = true
+	} else {
+		fallback["active"] = false
+		fallback["reason"] = resolution.reason
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":              "ok",
 		"version":             s.version,
@@ -129,6 +140,7 @@ func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"force_model":         orNone(s.cfg.ForceModel),
 		"model_list_mode":     s.cfg.ModelListMode,
 		"inline_image_policy": s.cfg.InlineImagePolicy,
+		"image_fallback":      fallback,
 		"model_aliases":       len(s.cfg.ModelAliases),
 		"backends_configured": configured,
 		"upstream_modes":      modes,
@@ -162,7 +174,17 @@ func (s *server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	s.warnForcedModel(req.Model, backendModel)
 
-	openaiBody, tr, err := anthropicToOpenAI(&req, backendModel, s.cfg, b.name)
+	// 图片 vision fallback：请求带图而当前这对后端 + 模型看不了图时，
+	// 整条请求改走 fallback 后端 + 模型，并把本次图片策略固定为 preserve，
+	// 避免「既转投又丢图」的双重处理。流式与非流式在同一处判定，行为一致。
+	imagePolicy := ""
+	if fb, ok := s.cfg.imageFallbackFor(&req, b, backendModel); ok {
+		s.logf("[bridge] image fallback: %s/%s -> %s/%s (requested=%s, images forwarded)",
+			b.name, backendModel, fb.backend.name, fb.model, req.Model)
+		b, backendModel, imagePolicy = fb.backend, fb.model, "preserve"
+	}
+
+	openaiBody, tr, err := anthropicToOpenAIWithPolicy(&req, backendModel, s.cfg, b.name, imagePolicy)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return

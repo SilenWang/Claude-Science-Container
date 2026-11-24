@@ -48,6 +48,7 @@ All via `.env` → docker-compose env vars → the bridge reads them directly at
 | `FORCE_MODEL` | Model used when no alias/pattern match applies (default `deepseek-flash`) |
 | `CUSTOM_UPSTREAM_MODE` | `openai` (default) or `anthropic` |
 | `INLINE_IMAGE_POLICY` | `omit_inline` (default), `omit`, `preserve`, `auto` |
+| `IMAGE_FALLBACK_MODE` / `_BACKEND` / `_MODEL` | Image requests the mapped model cannot read go to this vision backend/model (`auto` / `off`); inert until the target model is a vision model |
 | `*_MODEL_PATTERN` | Regex for model matching per backend |
 
 ## Key files

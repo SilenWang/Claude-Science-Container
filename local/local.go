@@ -679,8 +679,13 @@ func ProxyOptions(l config.Local) proxy.Options {
 		ForceModel:        l.ForceModel,
 		ModelListMode:     l.ModelListMode,
 		InlineImagePolicy: l.InlineImagePolicy,
-		ProxyHost:         loopbackHost(l.ProxyHost),
-		ProxyPort:         l.ProxyPort,
+		ImageFallback: proxy.ImageFallbackOptions{
+			Mode:    l.ImageFallback.Mode,
+			Backend: l.ImageFallback.Backend,
+			Model:   l.ImageFallback.Model,
+		},
+		ProxyHost: loopbackHost(l.ProxyHost),
+		ProxyPort: l.ProxyPort,
 	}
 	for _, alias := range l.ModelAliases {
 		opts.ModelAliases = append(opts.ModelAliases, proxy.ModelAlias{

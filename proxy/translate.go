@@ -122,6 +122,13 @@ func suffixToolName(base string, n int) string {
 // anthropicToOpenAI 把 Anthropic Messages 请求翻译成 OpenAI Chat Completions 请求。
 // stream 由 req.Stream 决定：M2 起流式请求会把 stream=true 透传给上游。
 func anthropicToOpenAI(req *anthropicRequest, backendModel string, cfg *config, backendName string) (map[string]any, *translation, error) {
+	return anthropicToOpenAIWithPolicy(req, backendModel, cfg, backendName, "")
+}
+
+// anthropicToOpenAIWithPolicy 与 anthropicToOpenAI 相同，但可以覆盖本次请求的
+// 图片策略。vision fallback 命中时传 "preserve"：图已经决定改发给能读图的后端，
+// 就不能再让 INLINE_IMAGE_POLICY 把同一张图丢掉。空串表示按配置走。
+func anthropicToOpenAIWithPolicy(req *anthropicRequest, backendModel string, cfg *config, backendName, imagePolicyOverride string) (map[string]any, *translation, error) {
 	messages := make([]map[string]any, 0, len(req.Messages)+1)
 	tr := newTranslation()
 
@@ -134,6 +141,9 @@ func anthropicToOpenAI(req *anthropicRequest, backendModel string, cfg *config, 
 	}
 
 	imagePolicy := imagePolicyFor(backendName, cfg.InlineImagePolicy)
+	if override := strings.ToLower(strings.TrimSpace(imagePolicyOverride)); override != "" {
+		imagePolicy = imagePolicyFor(backendName, override)
+	}
 
 	for _, msg := range req.Messages {
 		switch msg.Role {
