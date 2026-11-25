@@ -394,7 +394,8 @@ func TestPreservePolicyBeatsFallback(t *testing.T) {
 }
 
 // TestAnthropicUpstreamNeverFallsBack 覆盖显式 upstream_mode=anthropic：这种
-// 上游原生接收 Anthropic 载荷，图片直通，不能被 fallback 误转。
+// 配置保持原后端、不被 fallback 误转（M1 未实现 Anthropic 直通，因此它实际
+// 起的是「抑制 fallback」作用，图片仍交给 INLINE_IMAGE_POLICY）。
 func TestAnthropicUpstreamNeverFallsBack(t *testing.T) {
 	ds := newCaptureUpstream(t, replyJSON)
 	oa := newCaptureUpstream(t, replyJSON)
@@ -414,8 +415,9 @@ func TestAnthropicUpstreamNeverFallsBack(t *testing.T) {
 	if body["model"] != "deepseek-flash" {
 		t.Fatalf("anthropic upstream model = %#v", body["model"])
 	}
-	// 不误转只保证「请求还留在原后端」；图片本身仍按 INLINE_IMAGE_POLICY
-	// 处理（这里是 omit_inline，照旧丢弃），要原样发送需显式 preserve。
+	// 不误转只保证「请求还留在原后端」；M1 下 anthropic 模式仍按 OpenAI 兼容
+	// 路径发送，图片按 INLINE_IMAGE_POLICY 处理（这里是 omit_inline，照旧丢弃），
+	// 要原样发送需显式 preserve 或把该后端改成 openai 模式以启用 fallback。
 	if logs.contains("image fallback") {
 		t.Fatalf("anthropic upstream logged a fallback: %#v", logs.lines)
 	}

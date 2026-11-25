@@ -68,16 +68,6 @@ func (f imageFallback) isAuto() bool {
 	return false
 }
 
-// describe 是给健康检查与日志用的一行描述。
-func (f imageFallback) describe() string {
-	backend := strings.TrimSpace(f.Backend)
-	model := strings.TrimSpace(f.Model)
-	if backend == "" || model == "" {
-		return imageFallbackOff
-	}
-	return backend + "/" + model
-}
-
 // 已知能读图的模型家族。名字落在这些家族里才认为当前模型有视觉出口；
 // 其余一律按纯文本处理——未知名字（deepseek-flash 之类）才是常态，
 // 把图发给它只会被上游 400 拒绝。名字不在列表里但确实能读图时，
@@ -97,9 +87,15 @@ func modelLooksVisionCapable(model string) bool {
 }
 
 // backendSeesImages 报告这对后端 + 模型能不能看到图。
-//   - upstream_mode=anthropic 的上游原生接收 Anthropic 载荷，图片原样透传，
-//     显式选了这种模式就不再转投（避免把一个本想直连的请求改到别处）。
-//   - 其余上游按模型名推断。
+//
+// upstream_mode=anthropic 的上游一律不参与 fallback：显式选了这种模式的请求
+// 保持在原后端，图片交给 INLINE_IMAGE_POLICY 处理。注意 M1 并没有实现 Anthropic
+// 直通——这种配置只会打一条「not supported」告警，callUpstream 仍走
+// /chat/completions（见 proxy/config.go 与 callUpstream）——所以这条分支的实际
+// 效果是「抑制 fallback」而非「图片原生直通」。要启用 fallback，请把该后端配成
+// upstream_mode=openai（默认值）。
+//
+// 其余上游按模型名推断视觉能力。
 func backendSeesImages(b *backend, model string) bool {
 	if b != nil && normalizeUpstreamMode(b.rawMode) == "anthropic" {
 		return true

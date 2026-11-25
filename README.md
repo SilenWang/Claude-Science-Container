@@ -110,7 +110,7 @@ If neither applies, check the logs: `claude-science logs --tail 100` for the UI 
    DEEPSEEK_API_KEY=sk-your-api-key-here
    DEFAULT_BACKEND=deepseek
    ```
-   The default model is `deepseek-flash` (shown as **DeepSeek Flash** in the model selector). It is a text-only model: pasted images are dropped by default and replaced with a placeholder note. To keep image input, point `IMAGE_FALLBACK_BACKEND` / `IMAGE_FALLBACK_MODEL` at a vision model (see [Image Handling](#image-handling)); set `INLINE_IMAGE_POLICY=preserve` only after switching `FORCE_MODEL` / `MODEL_ALIASES` to a vision model. Until the fallback target is a vision model it stays inert, so the shipped defaults behave exactly as before.
+   The default model is `deepseek-flash` (shown as **DeepSeek Flash** in the model selector). It is a text-only model: pasted images are dropped by default and replaced with a placeholder note. To keep image input, point `IMAGE_FALLBACK_BACKEND` / `IMAGE_FALLBACK_MODEL` at a vision model and leave that backend on `upstream_mode=openai` (see [Image Handling](#image-handling)); until the fallback target is a vision model it stays inert, so the shipped defaults behave exactly as before. If you instead map requests directly to a vision model, set `INLINE_IMAGE_POLICY=preserve` — the fallback only handles models that cannot read images.
 
 3. **Build and start**
    - **Without Nvidia GPU** (default):
@@ -367,7 +367,7 @@ For the container, all configuration is done via environment variables in `.env`
 | `CUSTOM_BASE_URL` | API base URL (e.g., SiliconFlow, Moonshot) | — |
 | `DEEPSEEK_API_KEY` | API key for DeepSeek official API | — |
 | `DEEPSEEK_BASE_URL` | DeepSeek API base URL | `https://api.deepseek.com` |
-| `DEEPSEEK_UPSTREAM_MODE` | DeepSeek upstream protocol: `openai` (default); `anthropic` is accepted but logs a warning and is still treated as `openai` | `openai` |
+| `DEEPSEEK_UPSTREAM_MODE` | DeepSeek upstream protocol: `openai` (default); `anthropic` is accepted but logs a warning and is still treated as `openai`, and it suppresses the image fallback | `openai` |
 | `OPENAI_API_KEY` | API key for OpenAI backend | — |
 | `OPENAI_BASE_URL` | OpenAI API base URL | `https://api.openai.com` |
 | `DEFAULT_BACKEND` | Default backend selection: `custom`, `deepseek`, `openai` | `deepseek` |
@@ -448,7 +448,7 @@ Container data (Claude Science configuration and sessions) is stored in a Docker
 
 ## Multi-Model Configuration (model_aliases)
 
-When using the DeepSeek official API in Anthropic-compatible mode, you can configure multiple models (e.g., DeepSeek Flash and Pro) to appear in Claude Science's model selector simultaneously. This uses the bridge's `model_aliases` mechanism instead of `FORCE_MODEL`.
+When using the DeepSeek official API, you can configure multiple models (e.g., DeepSeek Flash and Pro) to appear in Claude Science's model selector simultaneously. This uses the bridge's `model_aliases` mechanism instead of `FORCE_MODEL`.
 
 ### How it works
 
@@ -466,6 +466,8 @@ MODEL_ALIASES='[{"id":"claude-haiku-4-5","display_name":"DeepSeek Flash","backen
 ```
 
 With this configuration, the model selector shows **DeepSeek Flash** and **DeepSeek V4 Pro** as two options. An alias always wins over `FORCE_MODEL`; only requests that match no alias fall back to it.
+
+`DEEPSEEK_UPSTREAM_MODE=anthropic` is accepted for compatibility but not implemented in M1 (the bridge only logs a warning and keeps talking OpenAI to the backend). One visible consequence: a backend in that mode is never rerouted by the image vision fallback, so images still follow `INLINE_IMAGE_POLICY`. Drop the line (or set `DEEPSEEK_UPSTREAM_MODE=openai`) when you want `IMAGE_FALLBACK_*` to carry images to a vision model.
 
 By default (no `MODEL_ALIASES` override), the container ships with a single alias that shows **DeepSeek Flash** in the selector while sending `deepseek-flash` to the DeepSeek official API. Because that model is text-only, the default `INLINE_IMAGE_POLICY=omit_inline` drops inline images; switch both the model and the policy to a vision model if you need image input.
 
@@ -559,8 +561,10 @@ When a request carries an image and the model it resolves to cannot read images,
 
 How "can read images" is decided — the bridge does not probe upstreams, so it uses two rules:
 
-- A backend configured with `upstream_mode = "anthropic"` receives Anthropic payloads natively; it counts as vision-capable and is never rerouted.
+- A backend configured with `upstream_mode = "anthropic"` is never rerouted. **M1 does not implement Anthropic pass-through**: that setting only logs a `not supported in M1` warning and the bridge still speaks OpenAI (`/chat/completions`) to the backend, so this rule effectively *suppresses* the fallback — images then follow `INLINE_IMAGE_POLICY` as before. Use `upstream_mode = "openai"` (the default) on the backend you want the fallback to route away from, and on the fallback backend itself.
 - Every other model is judged by name: `gpt-4o`/`gpt-4.1`/`gpt-5`, `o1`/`o3`/`o4`, `claude-*`, `gemini*`, `glm-4v*`, `internvl*`, `llava*`, `pixtral*`, `minicpm-v`, `deepseek-vl*`, and any name containing `vision` or a `-vl` / `_vl` / `vlm` token. Everything else (including `deepseek-flash`) counts as text-only.
+
+The fallback only fires when the model a request *resolves* to cannot read images. If you map requests straight to a vision model (`FORCE_MODEL=gpt-4o`, or an alias whose `model` is a vision model), nothing is rerouted and `INLINE_IMAGE_POLICY` still decides what happens to the images — with the default `omit_inline`, base64 images are dropped even though the model could read them. Pair such a mapping with `INLINE_IMAGE_POLICY=preserve`.
 
 If you point the bridge at a vision model whose name is outside those families, set `IMAGE_FALLBACK_MODE=off` (or `image_fallback.mode: "off"`) together with `INLINE_IMAGE_POLICY=preserve`: `preserve` alone is enough to stop dropping, but `auto` would still judge the model by name.
 
