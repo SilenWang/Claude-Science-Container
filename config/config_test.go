@@ -144,6 +144,43 @@ func TestLoadFillsDefaults(t *testing.T) {
 	}
 }
 
+// TestImageFallbackRoundTrip 断言 config.json 的 image_fallback 块能原样存取，
+// 且缺省时保持零值（fallback 不生效），不会因为 ApplyDefaults 被悄悄打开。
+func TestImageFallbackRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := Default()
+	cfg.Local.DefaultBackend = "deepseek"
+	cfg.Local.ImageFallback = ImageFallback{Mode: "auto", Backend: "openai", Model: "gpt-4o"}
+	if err := Save(path, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(data), `"image_fallback"`) {
+		t.Fatalf("saved config missing image_fallback:\n%s", data)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Local.ImageFallback != cfg.Local.ImageFallback {
+		t.Fatalf("round-trip image_fallback = %+v, want %+v", got.Local.ImageFallback, cfg.Local.ImageFallback)
+	}
+
+	// 老配置没有这个块：Load 不能凭空填出 fallback 目标。
+	legacyPath := writeTemp(t, `{"local": {"default_backend": "deepseek"}}`)
+	legacy, err := Load(legacyPath)
+	if err != nil {
+		t.Fatalf("Load legacy: %v", err)
+	}
+	if legacy.Local.ImageFallback != (ImageFallback{}) {
+		t.Fatalf("legacy config gained an image fallback: %+v", legacy.Local.ImageFallback)
+	}
+}
+
 func TestLoadKeepsExplicitlyEmptyPortForwards(t *testing.T) {
 	path := writeTemp(t, `{
 	  "forward": {"targets": [{"name": "box", "ssh_host": "192.0.2.1", "ssh_key": "/k", "port_forwards": []}]}

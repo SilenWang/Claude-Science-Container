@@ -53,6 +53,7 @@ type Options struct {
 	ModelAliases      []ModelAlias
 	ModelListMode     string
 	InlineImagePolicy string
+	ImageFallback     ImageFallbackOptions
 	ProxyHost         string
 	ProxyPort         int
 	Backends          []BackendOptions
@@ -66,6 +67,7 @@ type config struct {
 	ModelAliases      []modelAlias
 	ModelListMode     string
 	InlineImagePolicy string
+	ImageFallback     imageFallback
 	ProxyHost         string
 	ProxyPort         int
 
@@ -213,8 +215,15 @@ func OptionsFromEnv() Options {
 		// 默认 omit_inline：默认模型 deepseek-flash 是纯文本模型，图片没有视觉出口；
 		// 显式设 preserve 之前，贴图会被丢弃并补占位文本。
 		InlineImagePolicy: envOr("INLINE_IMAGE_POLICY", "omit_inline"),
-		ProxyHost:         envOr("PROXY_HOST", defaultProxyHost),
-		ProxyPort:         envIntOr("PROXY_PORT", defaultProxyPort),
+		// 与原 Python 桥同名的三个变量；默认值取 deepseek-flash（纯文本），
+		// 因此在用户把 fallback 指向 vision 模型之前，auto 不会接管任何请求。
+		ImageFallback: ImageFallbackOptions{
+			Mode:    envOr("IMAGE_FALLBACK_MODE", "auto"),
+			Backend: envOr("IMAGE_FALLBACK_BACKEND", "deepseek"),
+			Model:   envOr("IMAGE_FALLBACK_MODEL", "deepseek-flash"),
+		},
+		ProxyHost: envOr("PROXY_HOST", defaultProxyHost),
+		ProxyPort: envIntOr("PROXY_PORT", defaultProxyPort),
 	}
 	for _, name := range []string{"deepseek", "openai", "custom"} {
 		prefix := strings.ToUpper(name)
@@ -317,6 +326,27 @@ func newConfigFromOptions(opts Options) *config {
 			c.warnings = append(c.warnings,
 				fmt.Sprintf("%s_UPSTREAM_MODE=%s is not supported in M1; treating %s as an OpenAI-compatible upstream", strings.ToUpper(name), b.rawMode, name))
 		}
+	}
+
+	// 图片 vision fallback：mode 收敛到 auto/off，后端名与模型去空白。
+	// 后端名不认识时清空 Backend，让 fallback 保持不生效而不是静默用默认后端。
+	mode, modeOK := normalizeImageFallbackMode(opts.ImageFallback.Mode)
+	if !modeOK {
+		c.warnings = append(c.warnings,
+			fmt.Sprintf("unknown IMAGE_FALLBACK_MODE %q; image fallback is disabled (accepted: auto, off)", opts.ImageFallback.Mode))
+	}
+	fbBackend := strings.ToLower(strings.TrimSpace(opts.ImageFallback.Backend))
+	if fbBackend != "" {
+		if _, ok := c.backends[fbBackend]; !ok {
+			c.warnings = append(c.warnings,
+				fmt.Sprintf("IMAGE_FALLBACK_BACKEND=%q is not a supported backend; image fallback is disabled (use deepseek, openai, or custom)", opts.ImageFallback.Backend))
+			fbBackend = ""
+		}
+	}
+	c.ImageFallback = imageFallback{
+		Mode:    mode,
+		Backend: fbBackend,
+		Model:   strings.TrimSpace(opts.ImageFallback.Model),
 	}
 	return c
 }
